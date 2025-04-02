@@ -1,0 +1,67 @@
+name: CI
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+      - name: Install Parent Folder
+        run: npm install
+      - name: Run linting
+        run: npm run lint
+
+  unused:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+      - name: Install Parent Folder
+        run: npm install
+      - name: Run unused code checking
+        run: npm run unused
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+      - name: Install Parent Folder
+        run: npm install
+      - name: Ensure no package-lock.json changes
+        run: git diff --exit-code
+      - name: Build
+        run: npm run build
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+      - name: Install Parent Folder
+        run: npm install
+      - name: Test
+        run: npm run test
+        env:
+          CI: true

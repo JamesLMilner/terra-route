@@ -1,0 +1,8 @@
+.github/
+.vscode/
+demo/
+benchmark/
+demo/
+docs/
+node_modules/
+coverage/
