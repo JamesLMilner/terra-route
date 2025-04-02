@@ -4,7 +4,7 @@ import { readFileSync } from 'fs';
 import GeoJSONPathFinder from "geojson-path-finder";
 import { pointNetworkPairs } from './points';
 import { shuffleArray } from './shuffle';
-import TerraRoute from '../src/terra-route';
+import { TerraRoute } from '../src/terra-route';
 import { createCheapRuler } from '../src/distance/cheap-ruler';
 
 const PathFinder = (GeoJSONPathFinder as any).default;

@@ -1,6 +1,7 @@
 import { FeatureCollection, LineString, Point, Feature, Position } from "geojson";
 import { MinHeap } from "./min-heap";
 import { haversineDistance } from "./distance/haversine";
+import { createCheapRuler } from "./distance/cheap-ruler";
 
 /**
  * TerraRoute is a routing utility for finding the shortest path
@@ -9,7 +10,7 @@ import { haversineDistance } from "./distance/haversine";
  * The class builds an internal graph structure based on the provided network,
  * then applies A* algorithm to compute the shortest route.
  */
-export class TerraRoute {
+class TerraRoute {
     private network: FeatureCollection<LineString>;
     private distanceMeasurement: (positionA: Position, positionB: Position) => number;
     private adjacencyList: Map<number, Array<{ node: number; distance: number }>>;
@@ -129,3 +130,4 @@ export class TerraRoute {
     }
 }
 
+export { TerraRoute, createCheapRuler, haversineDistance }
