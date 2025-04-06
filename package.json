@@ -1,6 +1,6 @@
 {
     "name": "terra-route",
-    "version": "0.0.3",
+    "version": "0.0.4",
     "description": "A library for routing along GeoJSON LineString networks",
     "scripts": {
         "docs": "typedoc",
