@@ -8,6 +8,10 @@ Terra Route aims to be a fast library for routing on GeoJSON LineStrings network
 npm install terra-route
 ```
 
+## Docs 
+
+[API Docs can be found here](https://jameslmilner.github.io/terra-route/)
+
 ## Example
 
 Here is a short example of how to use the TerraRoute class:
