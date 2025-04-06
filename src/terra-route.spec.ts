@@ -378,7 +378,7 @@ describe("TerraRoute", () => {
     it('is able to route through a interconnected hexagonal star polygon ignoring other routes than the direct line', () => {
         const network = generateStarPolygon(5, 1, [0, 0]);
         const points = getUniqueCoordinatesFromLineStrings(network);
-
+        routeFinder.buildRouteGraph(network);
 
         for (let i = 0; i < points.length - 1; i++) {
             const start = createPointFeature(points[i]);
@@ -393,6 +393,7 @@ describe("TerraRoute", () => {
     it('is able to route through a interconnected hexadecagon star polygon ignoring other routes than the direct line', () => {
         const network = generateStarPolygon(16, 1, [0, 0]);
         const points = getUniqueCoordinatesFromLineStrings(network);
+        routeFinder.buildRouteGraph(network);
 
         for (let i = 0; i < points.length - 1; i++) {
             const start = createPointFeature(points[i]);
@@ -407,6 +408,7 @@ describe("TerraRoute", () => {
     it('is able to route around a non-interconnected hexagon star polygon', () => {
         const network = generateStarPolygon(5, 1, [0, 0], false);
         const points = getUniqueCoordinatesFromLineStrings(network)
+        routeFinder.buildRouteGraph(network);
 
         for (let i = 1; i < points.length; i++) {
             const start = createPointFeature(points[0]);
@@ -425,6 +427,7 @@ describe("TerraRoute", () => {
     it('is able to route around a non-interconnected hexadecagon star polygon', () => {
         const network = generateStarPolygon(16, 1, [0, 0], false);
         const points = getUniqueCoordinatesFromLineStrings(network)
+        routeFinder.buildRouteGraph(network);
 
         for (let i = 1; i < points.length; i++) {
             const start = createPointFeature(points[0]);
@@ -445,6 +448,7 @@ describe("TerraRoute", () => {
         const depth = 5;
         const network = generateTreeFeatureCollection(depth, 2)
         const points = getUniqueCoordinatesFromLineStrings(network)
+        routeFinder.buildRouteGraph(network);
 
         const start = createPointFeature(points[0]);
         const end = createPointFeature(points[points.length - 1]);
@@ -457,8 +461,8 @@ describe("TerraRoute", () => {
 
     it('is able to traverse a concentric graph with 3 rings', () => {
         const network = generateConcentricRings(3, 10, 1, [0, 0])
-
         const points = getUniqueCoordinatesFromLineStrings(network)
+        routeFinder.buildRouteGraph(network);
 
         for (let i = 1; i < points.length; i++) {
             const start = createPointFeature(points[0]);
@@ -475,9 +479,7 @@ describe("TerraRoute", () => {
 
     it('is able to traverse a concentric graph with 5 rings', () => {
         const network = generateConcentricRings(5, 10, 1, [0, 0])
-
         const points = getUniqueCoordinatesFromLineStrings(network)
-
         routeFinder.buildRouteGraph(network);
 
         for (let i = 1; i < points.length; i++) {

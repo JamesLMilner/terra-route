@@ -10,10 +10,12 @@
         "build": "microbundle",
         "watch": "microbundle --watch --format modern",
         "unused": "knip",
-        "lint": "eslint --ext .ts src/",
-        "lint:quiet": "eslint --ext .ts --quiet src/",
-        "lint:fix": "eslint --fix --ext .ts src/",
-        "lint:fix:quiet": "eslint --fix --quiet --ext .ts src/"
+        "lint": "eslint --config eslint.config.mjs",
+        "lint:quiet": "eslint --quiet --config eslint.config.mjs",
+        "lint:fix": "eslint --fix --config eslint.config.mjs",
+        "lint:fix:quiet": "eslint --fix --quiet --config eslint.config.mjs",
+        "format": "prettier --ignore-path .gitignore --write \"**/*.+(js|ts|json)\"",
+        "format:quiet": "prettier --ignore-path .gitignore --write \"**/*.+(js|ts|json)\" --log-level=silent"
     },
     "type": "module",
     "source": "src/terra-route.ts",
@@ -29,6 +31,8 @@
     "author": "James Milner",
     "license": "MIT",
     "devDependencies": {
+        "@eslint/json": "^0.11.0",
+        "@eslint/markdown": "^6.3.0",
         "@types/jest": "^29.5.14",
         "@types/lodash": "^4.17.13",
         "@typescript-eslint/eslint-plugin": "8.16.0",
