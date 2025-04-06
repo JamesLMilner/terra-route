@@ -64,25 +64,6 @@
         "astar",
         "djikstra"
     ],
-    "eslintConfig": {
-        "parser": "@typescript-eslint/parser",
-        "plugins": [
-            "@typescript-eslint"
-        ],
-        "rules": {
-            "@typescript-eslint/no-empty-function": "warn",
-            "@typescript-eslint/no-explicit-any": "warn"
-        },
-        "extends": [
-            "plugin:@typescript-eslint/recommended",
-            "prettier"
-        ]
-    },
-    "prettier": {
-        "printWidth": 80,
-        "semi": true,
-        "useTabs": true
-    },
     "knip": {
         "$schema": "https://unpkg.com/knip@5/schema.json",
         "entry": [
