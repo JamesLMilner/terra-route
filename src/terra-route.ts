@@ -11,30 +11,21 @@ import { createCheapRuler } from "./distance/cheap-ruler";
  * then applies A* algorithm to compute the shortest route.
  */
 class TerraRoute {
-    private network: FeatureCollection<LineString>;
+    private network: FeatureCollection<LineString> | undefined;
     private distanceMeasurement: (positionA: Position, positionB: Position) => number;
-    private adjacencyList: Map<number, Array<{ node: number; distance: number }>>;
-    private coords: Position[];
-    private coordMap: Map<number, Map<number, number>>;
+    private adjacencyList: Map<number, Array<{ node: number; distance: number }>> = new Map();
+    private coords: Position[] = []
+    private coordMap: Map<number, Map<number, number>> = new Map();
 
     /**
      * Creates a new instance of TerraRoute.
      * 
-     * @param network - A GeoJSON FeatureCollection of LineStrings representing the route network.
      * @param distanceMeasurement - Optional custom distance measurement function (defaults to haversine distance).
      */
     constructor(
-        network: FeatureCollection<LineString>,
         distanceMeasurement?: (positionA: Position, positionB: Position) => number
     ) {
-        this.network = network;
-        this.adjacencyList = new Map();
-        this.coords = [];
-        this.coordMap = new Map();
         this.distanceMeasurement = distanceMeasurement ? distanceMeasurement : haversineDistance;
-
-        // 
-        this.buildNetworkGraph();
     }
 
     /**
@@ -63,9 +54,17 @@ class TerraRoute {
     /**
      * Builds the internal graph representation (adjacency list) from the input network.
      * Each LineString segment is translated into bidirectional graph edges with associated distances.
-     * Assumes that the network is a connected graph of LineStrings with shared coordinates.
+     * Assumes that the network is a connected graph of LineStrings with shared coordinates. Calling this 
+     * method with a new network overwrite any existing network and reset all internal data structures.
+     * 
+     * @param network - A GeoJSON FeatureCollection of LineStrings representing the road network.
      */
-    private buildNetworkGraph(): void {
+    public buildRouteGraph(network: FeatureCollection<LineString>): void {
+        this.network = network;
+        this.adjacencyList = new Map();
+        this.coords = [];
+        this.coordMap = new Map();
+
         for (const feature of this.network.features) {
             const coords = feature.geometry.coordinates;
             for (let i = 0; i < coords.length - 1; i++) {
@@ -88,10 +87,20 @@ class TerraRoute {
     * @param start - A GeoJSON Point Feature representing the start location.
     * @param end - A GeoJSON Point Feature representing the end location.
     * @returns A GeoJSON LineString Feature representing the shortest path, or null if no path is found.
+    * 
+    * @throws Error if the network has not been built yet with buildRouteGraph(network).
     */
     public getRoute(start: Feature<Point>, end: Feature<Point>): Feature<LineString> | null {
+        if (!this.network) {
+            throw new Error("Network not built. Please call buildNetworkGraph(network) first.");
+        }
+
         const startIdx = this.coordinateIndex(start.geometry.coordinates);
         const endIdx = this.coordinateIndex(end.geometry.coordinates);
+
+        if (startIdx === endIdx) {
+            return null;
+        }
 
         const openSet = new MinHeap();
         openSet.insert(0, startIdx);
@@ -115,7 +124,9 @@ class TerraRoute {
                 };
             }
 
-            for (const neighbor of this.adjacencyList.get(current) || []) {
+            const neighbors = this.adjacencyList.get(current) || [];
+
+            for (const neighbor of neighbors) {
                 const tentativeGScore = (gScore.get(current) ?? Infinity) + neighbor.distance;
                 if (tentativeGScore < (gScore.get(neighbor.node) ?? Infinity)) {
                     cameFrom.set(neighbor.node, current);

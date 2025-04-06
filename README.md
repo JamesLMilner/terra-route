@@ -1,6 +1,6 @@
 # Terra Route
 
-Terra Route aims to be a performant library for routing on GeoJSON LineStrings, where LineStrings share identical coordinates. Terra Routes main aim is performance.
+Terra Route aims to be a fast library for routing on GeoJSON LineStrings networks, where LineStrings share identical coordinates. Terra Routes main aim is currently performance.
 
 ## Install
 
@@ -9,6 +9,8 @@ npm install terra-route
 ```
 
 ## Example
+
+Here is a short example of how to use the TerraRoute class:
 
 ```typescript
 import { FeatureCollection, LineString, Point, Feature } from "geojson";
@@ -63,14 +65,31 @@ const endPoint: Feature<Point> = {
   properties: {},
 };
 
-// Initialize TerraRoute
-const router = new TerraRoute(network);
+// Initialize TerraRoute instance
+const router = new TerraRoute();
+
+// We must build the route graph first before calling getRoute
+router.buildRouteGraph(network);
 
 // Get shortest route
 const route = router.getRoute(startPoint, endPoint);
 
 console.log("Shortest route:", JSON.stringify(route, null, 2));
 ```
+
+## Benchmarks
+
+You can run the benchmarks yourself using:
+
+```
+npm run benchmark
+```
+
+Using default Haversine distance, Terra Route is approximately 1.6x faster than GeoJSON Path Finder with Haversine distance. If you pass in the CheapRuler distance metric (you can use the exposed `createCheapRuler` function), it is about 3x faster. 
+
+## Limitations
+
+TerraRoute does not current support 
 
 ## Acknowledgements
 
