@@ -89,7 +89,7 @@ Using default Haversine distance, Terra Route is approximately 1.6x faster than 
 
 ## Limitations
 
-TerraRoute does not current support 
+Terra Route does not currently support weighting functions.
 
 ## Acknowledgements
 
