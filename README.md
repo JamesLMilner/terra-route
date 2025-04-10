@@ -1,6 +1,6 @@
 # Terra Route
 
-Terra Route aims to be a fast library for routing on GeoJSON LineStrings networks, where LineStrings share identical coordinates. Terra Routes main aim is currently performance.
+Terra Route aims to be a fast library for routing on GeoJSON LineStrings networks, where LineStrings share identical coordinates. Terra Routes main aim is currently performance - it uses bidirectional A* to help achieve this.
 
 ## Install
 
@@ -89,7 +89,7 @@ You can run the benchmarks yourself using:
 npm run benchmark
 ```
 
-Using default Haversine distance, Terra Route is approximately 1.6x faster than GeoJSON Path Finder with Haversine distance. If you pass in the CheapRuler distance metric (you can use the exposed `createCheapRuler` function), it is about 3x faster. 
+Using default Haversine distance, Terra Route is approximately 3x faster than GeoJSON Path Finder with Haversine distance. If you pass in the CheapRuler distance metric (you can use the exposed `createCheapRuler` function), it is about 5x faster. 
 
 ## Limitations
 
