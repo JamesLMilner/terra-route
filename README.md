@@ -83,13 +83,22 @@ console.log("Shortest route:", JSON.stringify(route, null, 2));
 
 ## Benchmarks
 
-You can run the benchmarks yourself using:
+The benchmarks make use of a series out route example route networks from OSM in a moderate sized section of East London. It runs against the GeoJSON Path Finder library and also the ngraph.graph library. You can run the benchmarks yourself using:
 
 ```
 npm run benchmark
 ```
 
-Using default Haversine distance, Terra Route is approximately 3x faster than GeoJSON Path Finder with Haversine distance. If you pass in the CheapRuler distance metric (you can use the exposed `createCheapRuler` function), it is about 5x faster. 
+Here is an example output of a benchmark run for routing:
+
+TerraRoute with CheapRuler | █ 26ms
+TerraRoute                 | ██ 42ms
+GeoJSON Path Finder        | █████████████████████████ 609ms
+ngraph.graph               | ██████████████████████████████████████████████████ 1227ms
+
+Using default Haversine distance, Terra Route is approximately 13x faster than GeoJSON Path Finder with Haversine distance for A -> B path finding. If you pass in the CheapRuler distance metric (you can use the exposed `createCheapRuler` function), it is about 22x faster. 
+
+For initialisation of the network, Terra Route is about 9x faster with Haversine and 14x faster with CheapRuler than GeoJSON Path Finder. Terra Draw splits out instantiating the Class of the library from the actual graph building, which is done via `buildRouteGraph`. This allows you to defer graph creation to an appropriate time.
 
 ## Limitations
 

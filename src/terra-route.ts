@@ -1,5 +1,5 @@
 import { FeatureCollection, LineString, Point, Feature, Position } from "geojson";
-import { MinHeap } from "./min-heap";
+import { FibonacciHeap } from "./fibonacci-heap";
 import { haversineDistance } from "./distance/haversine";
 import { createCheapRuler } from "./distance/cheap-ruler";
 
@@ -102,8 +102,8 @@ class TerraRoute {
             return null;
         }
 
-        const openSetForward = new MinHeap();
-        const openSetBackward = new MinHeap();
+        const openSetForward = new FibonacciHeap();
+        const openSetBackward = new FibonacciHeap();
         openSetForward.insert(0, startIndex);
         openSetBackward.insert(0, endIndex);
 
