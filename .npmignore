@@ -6,3 +6,5 @@ demo/
 docs/
 node_modules/
 coverage/
+scratch/
+cli/
