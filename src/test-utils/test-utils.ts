@@ -374,6 +374,8 @@ export function getReasonIfLineStringInvalid(
         return `Not enough coordinates: ${coords.length} (${coords})`;
     }
 
+    const seen = new Set<string>();
+
     // 5. Validate each coordinate is a valid Position
     //    (At minimum, [number, number] or [number, number, number])
     for (const position of coords) {
@@ -389,5 +391,12 @@ export function getReasonIfLineStringInvalid(
         ) {
             return 'Not a Position; elements are not a numbers';
         }
+
+        // 6. Check for duplicates
+        const key = `${position[0]},${position[1]}`;
+        if (seen.has(key)) {
+            return `Duplicate coordinate: ${key}`;
+        }
+        seen.add(key);
     }
 }

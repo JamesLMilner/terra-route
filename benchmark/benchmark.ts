@@ -1,113 +1,85 @@
 
-import { Feature, FeatureCollection, LineString, Point, Position } from 'geojson';
-import { readFileSync } from 'fs';
-import GeoJSONPathFinder from "geojson-path-finder";
-import { pointNetworkPairs } from './points';
-import { TerraRoute } from '../src/terra-route';
-import { createCheapRuler } from '../src/distance/cheap-ruler';
+import { Position } from 'geojson';
+import { pointNetworkPairs } from './data/points';
+import { getRouteNetworkFromFile, shuffleArray, timesFaster } from './create-benchmark';
+import { registeredBenchmarks } from './registered-benchmarks';
+import { renderBarChart } from './ascii-chart';
 
-const PathFinder = (GeoJSONPathFinder as any).default;
-const pathToGeoJSON = (GeoJSONPathFinder as any).pathToGeoJSON;
+const benchmark = ({
+    networkPath,
+    pairs,
+    shuffle = false,
+    chart = true
+}: {
+    networkPath: string,
+    pairs: [Position, Position][],
+    shuffle?: boolean,
+    chart?: boolean
+}) => {
+
+    // Shuffle the input point pairs to ensure the order is not particularly important
+    if (shuffle) {
+        shuffleArray(pairs);
+    }
+
+    const network = getRouteNetworkFromFile(networkPath);
+    const benchmarks = registeredBenchmarks(network, pairs);
+
+    const benchmarksInitializeSorted = [...benchmarks].sort((a, b) => {
+        return a.initialize.timeTakenMilliseconds - b.initialize.timeTakenMilliseconds
+    })
+
+    const benchmarksRoutingSorted = [...benchmarks].sort((a, b) => {
+        return a.routing.timeTakenMilliseconds - b.routing.timeTakenMilliseconds
+    })
+
+    console.log('===== GRAPH NETWORK INITIALIZING PERFORMANCE =====');
+    for (let i = 0; i < benchmarks.length; i++) {
+        const bench = benchmarks[i];
+
+        console.log(`${bench.name} took ${bench.initialize.timeTakenMilliseconds}ms to initialize`)
+    }
+
+    const fastestInitialised = benchmarksInitializeSorted[0];
+    const slowestInitialized = benchmarksInitializeSorted[benchmarksInitializeSorted.length - 1];
+
+    console.log('');
+    console.log(`Fastest: ${fastestInitialised.name} which took ${fastestInitialised.initialize.timeTakenMilliseconds}ms`)
+
+    if (benchmarksInitializeSorted.length > 1) {
+        const timesFasterInitialization = timesFaster(fastestInitialised.initialize.timeTakenMilliseconds, slowestInitialized.initialize.timeTakenMilliseconds)
+        console.log(`${fastestInitialised.name} is x${timesFasterInitialization} faster than ${slowestInitialized.name} for initialization`);
+
+        console.log('');
+    }
+
+    console.log('===== GRAPH ROUTING PERFORMANCE =====');
+    for (let i = 0; i < benchmarks.length; i++) {
+        const bench = benchmarks[i];
+
+        console.log(`${bench.name} took ${bench.routing.timeTakenMilliseconds}ms to route ${pairs.length} point pairs`)
+    }
+
+    const fastestRouting = benchmarksRoutingSorted[0];
+    const slowestRouting = benchmarksRoutingSorted[benchmarksRoutingSorted.length - 1];
+
+    console.log('');
+    console.log(`Fastest: ${fastestRouting.name} which took ${fastestRouting.routing.timeTakenMilliseconds}ms`)
+
+    if (benchmarksRoutingSorted.length > 1) {
+        const timesFasterRouting = timesFaster(fastestRouting.routing.timeTakenMilliseconds, slowestRouting.routing.timeTakenMilliseconds)
+        console.log(`${fastestRouting.name} is x${timesFasterRouting} faster than ${slowestRouting.name} for routing`);
+    }
 
 
-function percentToTimesFaster(terraRouteTime: number, pathFinderTime: number): number {
-
-    const isFaster = terraRouteTime < pathFinderTime;
-
-    const timesFaster = isFaster
-        ? pathFinderTime / terraRouteTime
-        : terraRouteTime / pathFinderTime;
-
-    return +timesFaster.toFixed(2)
+    chart && renderBarChart(benchmarksRoutingSorted.map((bench) => ({
+        label: bench.name,
+        value: bench.routing.timeTakenMilliseconds,
+    })));
 }
 
-const benchmark = (networkPath: string, pairs: [Position, Position][]) => {
-    const network = readFileSync(networkPath, 'utf-8');
-    const networkParsed = JSON.parse(network) as FeatureCollection<LineString>;
-
-    const startTimeParseNetwork = Date.now();
-    const terraRoute = new TerraRoute();
-    terraRoute.buildRouteGraph(networkParsed);
-    const endTimeParseNetwork = Date.now();
-    const terraRouteTime = endTimeParseNetwork - startTimeParseNetwork;
-    console.log(`TerraRoute took ${terraRouteTime}ms to parse the network`);
-
-    const startTimeParseNetworkCheapRuler = Date.now();
-    const rulerDistance = createCheapRuler(networkParsed.features[0].geometry.coordinates[0][1]);
-    const terraRouteWithCheapRuler = new TerraRoute((positionA, positionB) => rulerDistance(positionA, positionB));
-    terraRouteWithCheapRuler.buildRouteGraph(networkParsed);
-    const endTimeParseNetworkCheapRuler = Date.now();
-    console.log(`TerraRoute with CheapRuler took ${endTimeParseNetworkCheapRuler - startTimeParseNetworkCheapRuler}ms to parse the network`);
-
-    const startTimeCreatePathFinder = Date.now();
-    const pathFinder = new PathFinder(networkParsed)
-    const endTimeCreatePathFinder = Date.now();
-    const pathFinderTime = endTimeCreatePathFinder - startTimeCreatePathFinder;
-    console.log(`PathFinder took ${pathFinderTime}ms to create the instance`);
-
-    console.log('')
-
-
-    const percentageDifferenceNetworkBuild = ((pathFinderTime - terraRouteTime) / pathFinderTime) * 100;
-    const isFaster = terraRouteTime < pathFinderTime
-    const timesFaster = percentToTimesFaster(terraRouteTime, pathFinderTime);
-    console.log(`TerraRoute is ${percentageDifferenceNetworkBuild.toFixed(2)}% ${isFaster ? 'faster' : 'slower'} (x${timesFaster.toFixed(2)}) than PathFinder for network parsing`);
-
-    console.log('')
-
-    const startTime = Date.now();
-    for (let i = 0; i < pairs.length; i++) {
-        const pair = pairs[i]
-        terraRoute.getRoute(
-            { type: "Feature", geometry: { type: "Point", coordinates: pair[0] } } as Feature<Point>,
-            { type: "Feature", geometry: { type: "Point", coordinates: pair[1] } } as Feature<Point>
-        )
-    }
-    const endTime = Date.now();
-    console.log(`TerraRoute took ${endTime - startTime}ms for ${pairs.length} pairs`);
-
-    const startTimeCheapRuler = Date.now();
-    for (let i = 0; i < pairs.length; i++) {
-        const pair = pairs[i]
-        terraRouteWithCheapRuler.getRoute(
-            { type: "Feature", geometry: { type: "Point", coordinates: pair[0] } } as Feature<Point>,
-            { type: "Feature", geometry: { type: "Point", coordinates: pair[1] } } as Feature<Point>
-        )
-    }
-    const endTimeCheapRuler = Date.now();
-    console.log(`TerraRoute with CheapRuler took ${endTimeCheapRuler - startTimeCheapRuler}ms for ${pairs.length} pairs`);
-
-
-    const startTimePathFinder = Date.now();
-    for (let i = 0; i < pairs.length; i++) {
-        const pair = pairs[i]
-        const result = pathFinder.findPath(
-            { type: "Feature", geometry: { type: "Point", coordinates: pair[0] } } as Feature<Point>,
-            { type: "Feature", geometry: { type: "Point", coordinates: pair[1] } } as Feature<Point>
-        )
-
-        // To keep things fair we also convert the path to GeoJSON
-        if (result?.path && result?.path.length > 1) {
-            pathToGeoJSON(result)
-        }
-    }
-    const endTimePathFinder = Date.now();
-    const pathfinderTime = endTimePathFinder - startTimePathFinder
-
-    console.log(`PathFinder took ${pathfinderTime}ms for ${pairs.length} pairs`);
-
-    console.log('')
-
-    // Percentage difference of how much faster or slower TerraRoute is than PathFinder.
-    // Here a lower times are better 
-    const percentageDifference = ((pathfinderTime) - (endTime - startTime)) / (pathfinderTime) * 100;
-    console.log(`TerraRoute with Haversine is ${percentageDifference.toFixed(2)}% ${percentageDifference > 0 ? 'faster' : 'slower'} (x${percentToTimesFaster(endTime - startTime, endTimePathFinder - startTimePathFinder)}) than PathFinder for route finding`);
-
-    // Percentage difference of how much faster or slower TerraRoute is than PathFinder.
-    // Here a lower times are better 
-    const percentageDifferenceWithCheapRuler = ((pathfinderTime) - (endTimeCheapRuler - startTimeCheapRuler)) / (endTimePathFinder - startTimePathFinder) * 100;
-    console.log(`TerraRoute with CheapRuler is ${percentageDifferenceWithCheapRuler.toFixed(2)}% ${percentageDifferenceWithCheapRuler > 0 ? 'faster' : 'slower'} (x${percentToTimesFaster(endTimeCheapRuler - startTimeCheapRuler, endTimePathFinder - startTimePathFinder)
-        }) than PathFinder for route finding`);
-}
-
-benchmark('benchmark/data/network.json', pointNetworkPairs);
+benchmark({
+    networkPath: 'benchmark/data/network.json',
+    pairs: pointNetworkPairs,
+    shuffle: true
+});

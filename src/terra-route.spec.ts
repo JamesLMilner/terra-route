@@ -356,6 +356,7 @@ describe("TerraRoute", () => {
         const result = routeFinder.getRoute(start, end);
 
         expect(result).not.toBeNull();
+        expect(getReasonIfLineStringInvalid(result)).toBe(undefined);
 
         // Should take diagonals: (0,0) → (0.01,0.01) → (0.05,0.05)
         const expectedRoute = [
@@ -371,7 +372,7 @@ describe("TerraRoute", () => {
 
         const resultTwo = routeFinder.getRoute(end, start);
         expect(resultTwo).not.toBeNull();
-        expect(getReasonIfLineStringInvalid(result)).toBe(undefined);
+        expect(getReasonIfLineStringInvalid(resultTwo)).toBe(undefined);
         expect(resultTwo!.geometry.coordinates).toEqual(expectedRoute.reverse());
     })
 
