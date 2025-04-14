@@ -1,4 +1,5 @@
 import { Position, Feature, Point, LineString, FeatureCollection } from "geojson";
+import { haversineDistance } from "../terra-route";
 
 export const createPointFeature = (coord: Position): Feature<Point> => ({
     type: "Feature",
@@ -399,4 +400,63 @@ export function getReasonIfLineStringInvalid(
         }
         seen.add(key);
     }
+}
+
+/**
+ * Checks if the start and end coordinates of a LineString match the given start and end points.
+ * 
+ * @param line - The LineString feature to check
+ * @param start - The start point feature
+ * @param end - The end point feature
+ * @return True if the start and end coordinates match, false otherwise
+ * */
+export function startAndEndAreCorrect(line: Feature<LineString>, start: Feature<Point>, end: Feature<Point>) {
+    const lineCoords = line.geometry.coordinates;
+    const startCoords = start.geometry.coordinates;
+    const endCoords = end.geometry.coordinates;
+
+    // Check if the first coordinate of the LineString matches the start point
+    const startMatches = lineCoords[0][0] === startCoords[0] && lineCoords[0][1] === startCoords[1];
+
+    // Check if the last coordinate of the LineString matches the end point
+    const endMatches = lineCoords[lineCoords.length - 1][0] === endCoords[0] && lineCoords[lineCoords.length - 1][1] === endCoords[1];
+
+    return startMatches && endMatches;
+}
+
+export function routeIsLongerThanDirectPath(line: Feature<LineString>, start: Feature<Point>, end: Feature<Point>) {
+    const lineCoords = line.geometry.coordinates;
+    const startCoords = start.geometry.coordinates;
+    const endCoords = end.geometry.coordinates;
+
+    if (lineCoords.length <= 2) {
+        return true;
+    }
+
+    // Calculate the direct distance between the start and end points
+    const directDistance = haversineDistance(startCoords, endCoords);
+
+    // Calculate the route distance
+    let routeDistance = 0;
+    for (let i = 0; i < lineCoords.length - 1; i++) {
+        routeDistance += haversineDistance(lineCoords[i], lineCoords[i + 1]);
+    }
+
+    // If the route distance is 0, it means the start and end points are the same
+    if (routeDistance === 0) {
+        return true;
+    }
+
+    if (routeDistance < directDistance) {
+
+        // Check if the route distance is very close to the direct distance
+        const absoluteDifference = Math.abs(routeDistance - directDistance);
+        if (absoluteDifference < 0.000000000001) {
+            return true;
+        }
+
+        return false;
+    }
+
+    return true
 }
