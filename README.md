@@ -94,8 +94,8 @@ Here is an example output of a benchmark run for routing:
 <pre>
 Terra Route with CheapRuler | █ 26ms
 Terra Route                 | ██ 42ms
-GeoJSON Path Finder        | █████████████████████████ 609ms
-ngraph.graph               | ██████████████████████████████████████████████████ 1227ms
+GeoJSON Path Finder         | █████████████████████████ 609ms
+ngraph.graph                | ██████████████████████████████████████████████████ 1227ms
 </pre>
 
 Using default Haversine distance, Terra Route is approximately 13x faster than GeoJSON Path Finder with Haversine distance for A -> B path finding. If you pass in the CheapRuler distance metric (you can use the exposed `createCheapRuler` function), it is about 22x faster. 
