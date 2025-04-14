@@ -92,8 +92,8 @@ npm run benchmark
 Here is an example output of a benchmark run for routing:
 
 <pre>
-TerraRoute with CheapRuler | █ 26ms
-TerraRoute                 | ██ 42ms
+Terra Route with CheapRuler | █ 26ms
+Terra Route                 | ██ 42ms
 GeoJSON Path Finder        | █████████████████████████ 609ms
 ngraph.graph               | ██████████████████████████████████████████████████ 1227ms
 </pre>
