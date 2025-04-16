@@ -6,12 +6,13 @@ import { aStar } from "ngraph.path";
 import createGraph from "ngraph.graph";
 
 // Terra Route
-import { TerraRoute, createCheapRuler, haversineDistance } from "../src_/terra-route";
+import { TerraRoute, createCheapRuler, haversineDistance } from "../src/terra-route";
+import { FibonacciHeap } from "../src/heap/fibonacci-heap";
+import { PairingHeap } from "../src/heap/pairing-heap";
 
 // GeoJSON Path Finder
 import GeoJSONPathFinder from "geojson-path-finder";
-import { FibonacciHeap } from "../src_/heap/fibonacci-heap";
-import { PairingHeap } from "../src_/heap/pairing-heap";
+
 
 const PathFinder = (GeoJSONPathFinder as any).default;
 const pathToGeoJSON = (GeoJSONPathFinder as any).pathToGeoJSON;
@@ -84,7 +85,7 @@ export const registeredBenchmarks = (network: FeatureCollection<LineString>, pai
                     { type: "Feature", geometry: { type: "Point", coordinates: pair[1] } } as Feature<Point>
                 )
             }
-        },
+        }
     ),
     createRoutingBenchmark(
         'GeoJSON Path Finder',
@@ -143,6 +144,6 @@ export const registeredBenchmarks = (network: FeatureCollection<LineString>, pai
                     properties: {}
                 };
             }
-        },
+        }
     )
 ].filter((benchmark) => benchmark !== null);
