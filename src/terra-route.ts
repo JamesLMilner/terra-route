@@ -120,6 +120,11 @@ class TerraRoute {
             // Extract the node with the smallest fScore
             const current = openSet.extractMin()!;
 
+            // Skip nodes we've already processed
+            if (visited.has(current)) {
+                continue;
+            }
+
             // If we've reached the end node, we're done
             if (current === endIndex) {
                 break;
