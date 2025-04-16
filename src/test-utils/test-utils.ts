@@ -24,6 +24,20 @@ export const createLineStringFeature = (coordinates: Position[]): Feature<LineSt
     properties: {},
 });
 
+export function routeLength(
+    line: Feature<LineString>,
+
+) {
+    const lineCoords = line.geometry.coordinates;
+
+    // Calculate the total route distance
+    let routeDistance = 0;
+    for (let i = 0; i < lineCoords.length - 1; i++) {
+        routeDistance += haversineDistance(lineCoords[i], lineCoords[i + 1]);
+    }
+    return routeDistance
+}
+
 export function generateGridWithDiagonals(n: number, spacing: number): FeatureCollection<LineString> {
     const features: Feature<LineString>[] = [];
 
@@ -112,9 +126,9 @@ export function generateGridWithDiagonals(n: number, spacing: number): FeatureCo
  */
 export function generateStarPolygon(
     n: number,
-    radius: number = 0.01,
+    radius = 0.01,
     center: Position = [0, 0],
-    connectAll: boolean = true
+    connectAll = true
 ): FeatureCollection<LineString> {
     if (n < 3) {
         throw new Error("Star polygon requires at least 3 vertices.");
@@ -213,7 +227,7 @@ export function generateTreeFeatureCollection(
     depth: number,
     branchingFactor: number,
     root: Position = [0, 0],
-    length: number = 0.01
+    length = 0.01
 ): FeatureCollection<LineString> {
     if (depth < 1) {
         throw new Error("Tree must have at least depth 1.");

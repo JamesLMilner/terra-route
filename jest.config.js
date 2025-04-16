@@ -12,7 +12,7 @@ export default {
     "<rootDir>/src/fixtures.ts",
   ],
   collectCoverage: true,
-  coveragePathIgnorePatterns: ["<rootDir>/src/test-utils"],
+  coveragePathIgnorePatterns: ["<rootDir>/src/test-utils", "<rootDir>/src/heap/heap.d.ts",],
   collectCoverageFrom: ["./src/**"],
   coverageThreshold: {
     global: {

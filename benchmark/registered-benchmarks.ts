@@ -6,16 +6,19 @@ import { aStar } from "ngraph.path";
 import createGraph from "ngraph.graph";
 
 // Terra Route
-import { TerraRoute, createCheapRuler, haversineDistance } from "../src/terra-route";
+import { TerraRoute, createCheapRuler, haversineDistance } from "../src_/terra-route";
 
 // GeoJSON Path Finder
 import GeoJSONPathFinder from "geojson-path-finder";
+import { FibonacciHeap } from "../src_/heap/fibonacci-heap";
+import { PairingHeap } from "../src_/heap/pairing-heap";
+
 const PathFinder = (GeoJSONPathFinder as any).default;
 const pathToGeoJSON = (GeoJSONPathFinder as any).pathToGeoJSON;
 
 export const registeredBenchmarks = (network: FeatureCollection<LineString>, pairs: Position[][]) => [
     createRoutingBenchmark(
-        'TerraRoute',
+        'Terra Route',
         () => {
             const terraRoute = new TerraRoute();
             terraRoute.buildRouteGraph(network);
@@ -32,10 +35,44 @@ export const registeredBenchmarks = (network: FeatureCollection<LineString>, pai
         }
     ),
     createRoutingBenchmark(
-        'TerraRoute with CheapRuler',
+        'Terra Route with Fibonacci Heap',
+        () => {
+            const terraRoute = new TerraRoute({ heap: FibonacciHeap });
+            terraRoute.buildRouteGraph(network);
+            return terraRoute
+        },
+        (terraRoute) => {
+            for (let i = 0; i < pairs.length; i++) {
+                const pair = pairs[i]
+                terraRoute.getRoute(
+                    { type: "Feature", geometry: { type: "Point", coordinates: pair[0] } } as Feature<Point>,
+                    { type: "Feature", geometry: { type: "Point", coordinates: pair[1] } } as Feature<Point>
+                )
+            }
+        }
+    ),
+    createRoutingBenchmark(
+        'Terra Route with Pairing Heap',
+        () => {
+            const terraRoute = new TerraRoute({ heap: PairingHeap });
+            terraRoute.buildRouteGraph(network);
+            return terraRoute
+        },
+        (terraRoute) => {
+            for (let i = 0; i < pairs.length; i++) {
+                const pair = pairs[i]
+                terraRoute.getRoute(
+                    { type: "Feature", geometry: { type: "Point", coordinates: pair[0] } } as Feature<Point>,
+                    { type: "Feature", geometry: { type: "Point", coordinates: pair[1] } } as Feature<Point>
+                )
+            }
+        }
+    ),
+    createRoutingBenchmark(
+        'Terra Route with CheapRuler',
         () => {
             const rulerDistance = createCheapRuler(network.features[0].geometry.coordinates[0][1]);
-            const terraRouteWithCheapRuler = new TerraRoute((positionA, positionB) => rulerDistance(positionA, positionB));
+            const terraRouteWithCheapRuler = new TerraRoute({ distanceMeasurement: (positionA, positionB) => rulerDistance(positionA, positionB) });
             terraRouteWithCheapRuler.buildRouteGraph(network);
             return terraRouteWithCheapRuler
         },
@@ -47,7 +84,7 @@ export const registeredBenchmarks = (network: FeatureCollection<LineString>, pai
                     { type: "Feature", geometry: { type: "Point", coordinates: pair[1] } } as Feature<Point>
                 )
             }
-        }
+        },
     ),
     createRoutingBenchmark(
         'GeoJSON Path Finder',
@@ -95,8 +132,17 @@ export const registeredBenchmarks = (network: FeatureCollection<LineString>, pai
         (pathFinder) => {
             for (let i = 0; i < pairs.length; i++) {
                 const pair = pairs[i]
-                pathFinder.find(pair[0].join(','), pair[1].join(','))
+                const route = pathFinder.find(pair[0].join(','), pair[1].join(','));
+                const coordinates = route.map((node: any) => node.id.split(',').map(Number));
+                const feature: Feature<LineString> = {
+                    type: "Feature",
+                    geometry: {
+                        type: "LineString",
+                        coordinates
+                    },
+                    properties: {}
+                };
             }
-        }
+        },
     )
 ].filter((benchmark) => benchmark !== null);

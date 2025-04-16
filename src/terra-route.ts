@@ -1,7 +1,8 @@
 import { FeatureCollection, LineString, Point, Feature, Position } from "geojson";
-import { FibonacciHeap } from "./fibonacci-heap";
 import { haversineDistance } from "./distance/haversine";
 import { createCheapRuler } from "./distance/cheap-ruler";
+import { MinHeap } from "./heap/min-heap";
+import { HeapConstructor } from "./heap/heap";
 
 /**
  * TerraRoute is a routing utility for finding the shortest path
@@ -16,16 +17,19 @@ class TerraRoute {
     private adjacencyList: Map<number, Array<{ node: number; distance: number }>> = new Map();
     private coords: Position[] = []
     private coordMap: Map<number, Map<number, number>> = new Map();
+    private heap: HeapConstructor;
 
     /**
      * Creates a new instance of TerraRoute.
      * 
      * @param distanceMeasurement - Optional custom distance measurement function (defaults to haversine distance).
      */
-    constructor(
-        distanceMeasurement?: (positionA: Position, positionB: Position) => number
-    ) {
-        this.distanceMeasurement = distanceMeasurement ? distanceMeasurement : haversineDistance;
+    constructor(options?: {
+        distanceMeasurement?: (positionA: Position, positionB: Position) => number,
+        heap?: HeapConstructor
+    }) {
+        this.heap = options?.heap ? options.heap : MinHeap
+        this.distanceMeasurement = options?.distanceMeasurement ? options.distanceMeasurement : haversineDistance;
     }
 
     /**
@@ -53,7 +57,7 @@ class TerraRoute {
 
     /**
      * Builds the internal graph representation (adjacency list) from the input network.
-     * Each LineString segment is translated into bidirectional graph edges with associated distances.
+     * Each LineString segment is translated into graph edges with associated distances.
      * Assumes that the network is a connected graph of LineStrings with shared coordinates. Calling this 
      * method with a new network overwrite any existing network and reset all internal data structures.
      * 
@@ -82,7 +86,7 @@ class TerraRoute {
     }
 
     /**
-    * Computes the shortest route between two points in the network using bidirectional A* algorithm.
+    * Computes the shortest route between two points in the network using the A* algorithm.
     * 
     * @param start - A GeoJSON Point Feature representing the start location.
     * @param end - A GeoJSON Point Feature representing the end location.
@@ -90,7 +94,10 @@ class TerraRoute {
     * 
     * @throws Error if the network has not been built yet with buildRouteGraph(network).
     */
-    public getRoute(start: Feature<Point>, end: Feature<Point>): Feature<LineString> | null {
+    public getRoute(
+        start: Feature<Point>,
+        end: Feature<Point>
+    ): Feature<LineString> | null {
         if (!this.network) {
             throw new Error("Network not built. Please call buildRouteGraph(network) first.");
         }
@@ -102,87 +109,65 @@ class TerraRoute {
             return null;
         }
 
-        const openSetForward = new FibonacciHeap();
-        const openSetBackward = new FibonacciHeap();
-        openSetForward.insert(0, startIndex);
-        openSetBackward.insert(0, endIndex);
+        const openSet = new this.heap();
+        openSet.insert(0, startIndex);
 
-        const cameFromForward = new Map<number, number>();
-        const cameFromBackward = new Map<number, number>();
-        const gScoreForward = new Map<number, number>([[startIndex, 0]]);
-        const gScoreBackward = new Map<number, number>([[endIndex, 0]]);
+        const cameFrom = new Map<number, number>();
+        const gScore = new Map<number, number>([[startIndex, 0]]);
+        const visited = new Set<number>();
 
-        const visitedForward = new Set<number>();
-        const visitedBackward = new Set<number>();
+        while (openSet.size() > 0) {
+            // Extract the node with the smallest fScore
+            const current = openSet.extractMin()!;
 
-        let meetingNode: number | null = null;
-
-        while (openSetForward.size() > 0 && openSetBackward.size() > 0) {
-            const currentForward = openSetForward.extractMin()!;
-            visitedForward.add(currentForward);
-
-            if (visitedBackward.has(currentForward)) {
-                meetingNode = currentForward;
+            // If we've reached the end node, we're done
+            if (current === endIndex) {
                 break;
             }
 
-            for (const neighbor of this.adjacencyList.get(currentForward) || []) {
-                const tentativeG = (gScoreForward.get(currentForward) ?? Infinity) + neighbor.distance;
-                if (tentativeG < (gScoreForward.get(neighbor.node) ?? Infinity)) {
-                    cameFromForward.set(neighbor.node, currentForward);
-                    gScoreForward.set(neighbor.node, tentativeG);
-                    const fScore = tentativeG + this.distanceMeasurement(this.coords[neighbor.node], this.coords[endIndex]);
-                    openSetForward.insert(fScore, neighbor.node);
-                }
-            }
+            visited.add(current);
 
-            const currentBackward = openSetBackward.extractMin()!;
-            visitedBackward.add(currentBackward);
+            // Explore neighbors
+            for (const neighbor of this.adjacencyList.get(current) || []) {
+                // Tentative cost from start to this neighbor
+                const tentativeG = (gScore.get(current) ?? Infinity) + neighbor.distance;
 
-            if (visitedForward.has(currentBackward)) {
-                meetingNode = currentBackward;
-                break;
-            }
+                // If this path to neighbor is better, record it
+                if (tentativeG < (gScore.get(neighbor.node) ?? Infinity)) {
+                    cameFrom.set(neighbor.node, current);
+                    gScore.set(neighbor.node, tentativeG);
 
-            for (const neighbor of this.adjacencyList.get(currentBackward) || []) {
-                const tentativeG = (gScoreBackward.get(currentBackward) ?? Infinity) + neighbor.distance;
-                if (tentativeG < (gScoreBackward.get(neighbor.node) ?? Infinity)) {
-                    cameFromBackward.set(neighbor.node, currentBackward);
-                    gScoreBackward.set(neighbor.node, tentativeG);
-                    const fScore = tentativeG + this.distanceMeasurement(this.coords[neighbor.node], this.coords[startIndex]);
-                    openSetBackward.insert(fScore, neighbor.node);
+                    // Calculate fScore: gScore + heuristic distance to the end
+                    const fScore =
+                        tentativeG +
+                        this.distanceMeasurement(this.coords[neighbor.node], this.coords[endIndex]);
+
+                    openSet.insert(fScore, neighbor.node);
                 }
             }
         }
 
-        if (meetingNode === null) {
+        // If we never set a path to the end node, there's no route
+        if (!cameFrom.has(endIndex)) {
             return null;
         }
 
-        // Reconstruct forward path
-        const pathForward: Position[] = [];
-        let node = meetingNode;
-        while (node !== undefined) {
-            pathForward.unshift(this.coords[node]);
-            node = cameFromForward.get(node)!;
-        }
+        // Reconstruct the path from end node to start node
+        const path: Position[] = [];
+        let node = endIndex;
 
-        // Reconstruct backward path (omit meeting node to avoid duplication)
-        const pathBackward: Position[] = [];
-        node = cameFromBackward.get(meetingNode)!;
         while (node !== undefined) {
-            pathBackward.push(this.coords[node]);
-            node = cameFromBackward.get(node)!;
+            path.unshift(this.coords[node]);
+            node = cameFrom.get(node)!;
         }
-
-        const fullPath = [...pathForward, ...pathBackward];
 
         return {
             type: "Feature",
-            geometry: { type: "LineString", coordinates: fullPath },
+            geometry: { type: "LineString", coordinates: path },
             properties: {},
         };
     }
+
 }
 
 export { TerraRoute, createCheapRuler, haversineDistance }
