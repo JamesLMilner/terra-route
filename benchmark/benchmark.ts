@@ -1,29 +1,36 @@
+/* eslint-disable no-console */
 
 import { Position } from 'geojson';
 import { pointNetworkPairs } from './data/points';
-import { getRouteNetworkFromFile, shuffleArray, timesFaster } from './create-benchmark';
+import { Benchmark, getRouteNetworkFromFile, shuffleArray, timesFaster } from './create-benchmark';
 import { registeredBenchmarks } from './registered-benchmarks';
 import { renderBarChart } from './ascii-chart';
 
 const benchmark = ({
-    networkPath,
+    benchmarks,
     pairs,
     shuffle = false,
     chart = true
 }: {
-    networkPath: string,
+    benchmarks: Benchmark[],
     pairs: [Position, Position][],
     shuffle?: boolean,
     chart?: boolean
 }) => {
+    if (pairs.length === 0) {
+        console.error('No point pairs provided for benchmarking.');
+        return;
+    }
+
+    if (benchmarks.length === 0) {
+        console.error('No benchmarks were registered. Please check your network and pairs.');
+        return;
+    }
 
     // Shuffle the input point pairs to ensure the order is not particularly important
     if (shuffle) {
         shuffleArray(pairs);
     }
-
-    const network = getRouteNetworkFromFile(networkPath);
-    const benchmarks = registeredBenchmarks(network, pairs);
 
     const benchmarksInitializeSorted = [...benchmarks].sort((a, b) => {
         return a.initialize.timeTakenMilliseconds - b.initialize.timeTakenMilliseconds
@@ -49,9 +56,12 @@ const benchmark = ({
     if (benchmarksInitializeSorted.length > 1) {
         const timesFasterInitialization = timesFaster(fastestInitialised.initialize.timeTakenMilliseconds, slowestInitialized.initialize.timeTakenMilliseconds)
         console.log(`${fastestInitialised.name} is x${timesFasterInitialization} faster than ${slowestInitialized.name} for initialization`);
-
-        console.log('');
     }
+
+    chart && renderBarChart(benchmarksInitializeSorted.map((bench) => ({
+        label: bench.name,
+        value: bench.initialize.timeTakenMilliseconds,
+    })));
 
     console.log('===== GRAPH ROUTING PERFORMANCE =====');
     for (let i = 0; i < benchmarks.length; i++) {
@@ -71,15 +81,21 @@ const benchmark = ({
         console.log(`${fastestRouting.name} is x${timesFasterRouting} faster than ${slowestRouting.name} for routing`);
     }
 
-
     chart && renderBarChart(benchmarksRoutingSorted.map((bench) => ({
         label: bench.name,
         value: bench.routing.timeTakenMilliseconds,
     })));
 }
 
+
+// Setup
+const networkPath = './benchmark/data/network.json'
+const network = getRouteNetworkFromFile(networkPath)
+const benchmarks = registeredBenchmarks(network, pointNetworkPairs)
+
+// Run the benchmarks
 benchmark({
-    networkPath: 'benchmark/data/network.json',
+    benchmarks,
     pairs: pointNetworkPairs,
-    shuffle: true
+    shuffle: true,
 });

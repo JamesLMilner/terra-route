@@ -3,7 +3,7 @@ import { readFileSync } from 'fs'
 
 type TimeTaken = { timeTakenMilliseconds: number }
 
-type Benchmark = {
+export type Benchmark = {
     name: string;
     initialize: TimeTaken;
     routing: TimeTaken;
@@ -19,7 +19,9 @@ export const createRoutingBenchmark = <T>(name: string, initialize: () => T, rou
     const endTimeInitialize = Date.now();
 
     const startTimeRouting = Date.now();
-    routing(result)
+    for (let i = 0; i < 3; i++) {
+        routing(result)
+    }
     const endTimeRouting = Date.now();
 
     return {
@@ -57,4 +59,8 @@ export const shuffleArray = <T>(array: T[]) => {
         [array[i], array[j]] = [array[j], array[i]];
     }
     return array;
+}
+
+export const filterDisabledBenchmarks = (benchmarks: (Benchmark | null)[]) => {
+    return benchmarks.filter((benchmark) => benchmark !== null);
 }

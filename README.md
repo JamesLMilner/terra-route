@@ -1,6 +1,6 @@
 # Terra Route
 
-Terra Route aims to be a fast library for routing on GeoJSON LineStrings networks, where LineStrings share identical coordinates. Terra Routes main aim is currently performance - it uses bidirectional A* to help achieve this.
+Terra Route aims to be a fast library for routing on GeoJSON LineStrings networks, where LineStrings share identical coordinates. Terra Routes main aim is currently performance - it uses A* to help achieve this.
 
 ## Install
 
