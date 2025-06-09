@@ -6,29 +6,40 @@ export class MinHeap implements Heap {
 
     insert(key: number, value: number): void {
         const node = { key, value, index: this.insertCounter++ };
-        let idx = this.heap.length;
+        let currentIndex = this.heap.length;
         this.heap.push(node);
 
-        // Optimized Bubble Up
-        while (idx > 0) {
-            const parentIdx = (idx - 1) >>> 1; // Fast Math.floor((idx - 1) / 2)
-            const parent = this.heap[parentIdx];
-            if (node.key > parent.key || (node.key === parent.key && node.index > parent.index)) break;
-            this.heap[idx] = parent;
-            idx = parentIdx;
+        while (currentIndex > 0) {
+            const parentIndex = (currentIndex - 1) >>> 1;
+            const parent = this.heap[parentIndex];
+
+            if (
+                key > parent.key ||
+                (key === parent.key && node.index > parent.index)
+            ) {
+                break;
+            }
+
+            this.heap[currentIndex] = parent;
+            currentIndex = parentIndex;
         }
-        this.heap[idx] = node;
+
+        this.heap[currentIndex] = node;
     }
 
     extractMin(): number | null {
-        const length = this.heap.length;
-        if (length === 0) return null;
+        const heap = this.heap;
+        const length = heap.length;
 
-        const minNode = this.heap[0];
-        const endNode = this.heap.pop()!;
+        if (length === 0) {
+            return null;
+        }
+
+        const minNode = heap[0];
+        const endNode = heap.pop()!;
 
         if (length > 1) {
-            this.heap[0] = endNode;
+            heap[0] = endNode;
             this.bubbleDown(0);
         }
 
@@ -39,52 +50,45 @@ export class MinHeap implements Heap {
         return this.heap.length;
     }
 
-    private bubbleDown(idx: number): void {
-        const { heap } = this;
+    private bubbleDown(index: number): void {
+        const heap = this.heap;
         const length = heap.length;
-        // Grab the parent node once, then move it down only if needed
-        const node = heap[idx];
+        const node = heap[index];
         const nodeKey = node.key;
         const nodeIndex = node.index;
 
-        // eslint-disable-next-line no-constant-condition
         while (true) {
-            // Calculate left and right child indexes
-            const leftIdx = (idx << 1) + 1;
-            if (leftIdx >= length) {
-                // No children => we’re already in place
+            const leftChildIndex = (index << 1) + 1;
+            if (leftChildIndex >= length) {
                 break;
             }
 
-            // Assume left child is the smaller one by default
-            let smallestIdx = leftIdx;
-            let smallestKey = heap[leftIdx].key;
-            let smallestIndex = heap[leftIdx].index;
+            let smallestIndex = leftChildIndex;
+            let smallest = heap[leftChildIndex];
 
-            const rightIdx = leftIdx + 1;
-            if (rightIdx < length) {
-                // Compare left child vs. right child
-                const rightKey = heap[rightIdx].key;
-                const rightIndex = heap[rightIdx].index;
-                if (rightKey < smallestKey || (rightKey === smallestKey && rightIndex < smallestIndex)) {
-                    smallestIdx = rightIdx;
-                    smallestKey = rightKey;
-                    smallestIndex = rightIndex;
+            const rightChildIndex = leftChildIndex + 1;
+            if (rightChildIndex < length) {
+                const right = heap[rightChildIndex];
+                if (
+                    right.key < smallest.key ||
+                    (right.key === smallest.key && right.index < smallest.index)
+                ) {
+                    smallestIndex = rightChildIndex;
+                    smallest = right;
                 }
             }
 
-            // Compare the smaller child with the parent
-            if (smallestKey < nodeKey || (smallestKey === nodeKey && smallestIndex < nodeIndex)) {
-                // Swap the smaller child up
-                heap[idx] = heap[smallestIdx];
-                idx = smallestIdx;
+            if (
+                smallest.key < nodeKey ||
+                (smallest.key === nodeKey && smallest.index < nodeIndex)
+            ) {
+                heap[index] = smallest;
+                index = smallestIndex;
             } else {
-                // We’re in the correct position now, so stop
                 break;
             }
         }
 
-        // Place the original node in its final position
-        heap[idx] = node;
+        heap[index] = node;
     }
 }
