@@ -19,9 +19,7 @@ export const createRoutingBenchmark = <T>(name: string, initialize: () => T, rou
     const endTimeInitialize = Date.now();
 
     const startTimeRouting = Date.now();
-    for (let i = 0; i < 3; i++) {
-        routing(result)
-    }
+    routing(result)
     const endTimeRouting = Date.now();
 
     return {

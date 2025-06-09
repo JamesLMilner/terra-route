@@ -92,10 +92,9 @@ npm run benchmark
 Here is an example output of a benchmark run for routing:
 
 <pre>
-Terra Route with CheapRuler     | ███████ 220ms
-Terra Route                     | ███████████ 360ms
-GeoJSON Path Finder             | ███████████████████ 592ms
-ngraph.graph                    | ██████████████████████████████████████████████████ 1587ms
+Terra Route         | ███████████ 270ms
+GeoJSON Path Finder | █████████████████████████ 591ms
+ngraph.graph        | ██████████████████████████████████████████████████ 1177ms
 </pre>
 
 Using default Haversine distance, Terra Route is approximately 1.6x faster than GeoJSON Path Finder with Haversine distance for A -> B path finding. If you pass in the CheapRuler distance metric (you can use the exposed `createCheapRuler` function), it is about x2.75 faster. 
