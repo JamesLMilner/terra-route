@@ -97,13 +97,14 @@ GeoJSON Path Finder | ███████████████████�
 ngraph.graph        | ██████████████████████████████████████████████████ 1177ms
 </pre>
 
-Using default Haversine distance, Terra Route is approximately 1.6x faster than GeoJSON Path Finder with Haversine distance for A -> B path finding. If you pass in the CheapRuler distance metric (you can use the exposed `createCheapRuler` function), it is about x2.75 faster. 
+Using default Haversine distance, Terra Route is approximately 2x faster than GeoJSON Path Finder with Haversine distance for A -> B path finding. If you pass in the CheapRuler distance metric (you can use the exposed `createCheapRuler` function), it is approximately x5 faster than GeoJSON Path Finder with Haversine distance. 
 
-For initialisation of the network, Terra Route is about 10x faster with Haversine than GeoJSON Path Finder. Terra Draw splits out instantiating the Class of the library from the actual graph building, which is done via `buildRouteGraph`. This allows you to defer graph creation to an appropriate time.
+For initialisation of the network, Terra Route is approximately 10x faster with Haversine than GeoJSON Path Finder. Terra Draw splits out instantiating the Class of the library from the actual graph building, which is done via `buildRouteGraph`. This allows you to defer graph creation to an appropriate time.
 
 ## Limitations
 
-Terra Route does not currently support weighting functions.
+- Terra Route does not currently support weighting functions.
+- Coordinates must be identical to be considered connected
 
 ## Acknowledgements
 
