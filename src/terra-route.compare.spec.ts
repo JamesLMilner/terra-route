@@ -1,7 +1,9 @@
 import PathFinder, { pathToGeoJSON } from "geojson-path-finder";
 import { FeatureCollection, LineString, Position } from "geojson";
 import { haversineDistance, TerraRoute } from "./terra-route";
-import { createPointFeature, routeLength } from "./test-utils/test-utils";
+import { routeLength } from "./test-utils/utils";
+import { createPointFeature } from "./test-utils/create";
+
 import { readFileSync } from 'fs';
 
 

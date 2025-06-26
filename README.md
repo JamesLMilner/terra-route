@@ -81,6 +81,13 @@ const route = router.getRoute(startPoint, endPoint);
 console.log("Shortest route:", JSON.stringify(route, null, 2));
 ```
 
+## Additional Functionality
+
+Terra Route also exposes functionality for understanding GeoJSON route networks better:
+
+- `countNodesAndEdges` - Counts the number of unique nodes and edges in the graph
+- `countConnectedComponents` - A connected component is a set of nodes in a graph where each node is reachable from any other node in the same set. This function counts the number in the FeatureCollection.
+
 ## Benchmarks
 
 The benchmarks make use of a series out route example route networks from OSM in a moderate sized section of East London. It runs against the GeoJSON Path Finder library and also the ngraph.graph library. You can run the benchmarks yourself using:

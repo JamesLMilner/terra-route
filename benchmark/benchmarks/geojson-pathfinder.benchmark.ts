@@ -3,16 +3,10 @@ import { createRoutingBenchmark } from "../create-benchmark";
 
 // GeoJSON Path Finder
 import GeoJSONPathFinder from "geojson-path-finder";
+import { BenchmarkProps } from "../registered-benchmarks";
 
 const PathFinder = (GeoJSONPathFinder as any).default;
 const pathToGeoJSON = (GeoJSONPathFinder as any).pathToGeoJSON;
-
-type BenchmarkProps = {
-    network: FeatureCollection<LineString>,
-    pairs: Position[][],
-    enabled?: boolean
-}
-
 
 export const CreateGeoJSONPathFinderBenchmark = ({
     network,

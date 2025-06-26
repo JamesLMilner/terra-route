@@ -1,8 +1,19 @@
 import { createCheapRuler } from "./distance/cheap-ruler";
 import { TerraRoute } from "./terra-route";
-import { createFeatureCollection, createLineStringFeature, createPointFeature, generateConcentricRings, generateGridWithDiagonals, generateStarPolygon, generateTreeFeatureCollection, getReasonIfLineStringInvalid, getUniqueCoordinatesFromLineStrings, routeIsLongerThanDirectPath, startAndEndAreCorrect } from "./test-utils/test-utils";
+import {
+    createFeatureCollection, createLineStringFeature, createPointFeature,
+} from "./test-utils/create";
+
+import {
+    generateConcentricRings, generateGridWithDiagonals, generateStarPolygon, generateTreeFeatureCollection,
+} from "./test-utils/generate-network";
+
+import {
+    getReasonIfLineStringInvalid, getUniqueCoordinatesFromLineStrings, routeIsLongerThanDirectPath, startAndEndAreCorrect
+} from "./test-utils/utils";
 
 describe("TerraRoute", () => {
+
     let routeFinder: TerraRoute;
 
     beforeEach(() => {
