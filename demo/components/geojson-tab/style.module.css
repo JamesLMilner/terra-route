@@ -1,0 +1,30 @@
+.geojson {
+  resize: none;
+  width: 100%;
+  flex-grow: 1;
+  height: calc(100vh - 193px);
+  /** accomidate the 3px margin top for the download button **/
+}
+
+.container {
+  padding: 20px;
+  display: flex;
+  flex-grow: 1;
+  flex-direction: column;
+}
+
+.download {
+  padding: 10px;
+  font-weight: bold;
+  background: #00d088;
+  color: white;
+  border: 0;
+  border: 2px solid rgba(0, 0, 0, 0.2);
+  margin-top: 3px;
+}
+
+.download:hover {
+  background: #00d088c4;
+  border: 2px solid rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+}

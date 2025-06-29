@@ -22,5 +22,6 @@ export const haversineDistance = (pointOne: Position, pointTwo: Position): numbe
     const radius = 6371e3;
     const distance = radius * c;
 
+
     return distance / 1000;
 }

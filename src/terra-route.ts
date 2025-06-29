@@ -3,6 +3,7 @@ import { haversineDistance } from "./distance/haversine";
 import { createCheapRuler } from "./distance/cheap-ruler";
 import { MinHeap } from "./heap/min-heap";
 import { HeapConstructor } from "./heap/heap";
+import { LineStringGraph } from "./graph/graph";
 
 interface Router {
     buildRouteGraph(network: FeatureCollection<LineString>): void;
@@ -192,4 +193,4 @@ class TerraRoute implements Router {
     }
 }
 
-export { TerraRoute, createCheapRuler, haversineDistance }
+export { TerraRoute, createCheapRuler, haversineDistance, LineStringGraph }

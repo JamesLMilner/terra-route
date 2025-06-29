@@ -1,0 +1,42 @@
+.current,
+.all {
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+  border: solid 3px #565656;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.header {
+  margin-top: 0;
+  font-weight: bolder;
+  font-size: 20px;
+  text-transform: capitalize;
+}
+
+.type {
+  display: inline-block;
+  width: 150px;
+}
+
+button:hover {
+  background: white;
+  border: solid 3px #222222;
+}
+
+.container {
+  width: 100%;
+  padding: 20px;
+}
+
+.row {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid #d9d9d9;
+  margin-bottom: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

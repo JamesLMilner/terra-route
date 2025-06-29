@@ -83,10 +83,20 @@ console.log("Shortest route:", JSON.stringify(route, null, 2));
 
 ## Additional Functionality
 
-Terra Route also exposes functionality for understanding GeoJSON route networks better:
+Terra Route also exposes functionality for understanding GeoJSON route networks better called `LineStringGraph`. This can be useful for debugging as this class has a series of methods for determining things like unique nodes, edges, connected components as well as all their counts. With this class you can understand your graph better programmatically, for example determining it's size and if it is correctly connected.
 
-- `countNodesAndEdges` - Counts the number of unique nodes and edges in the graph
-- `countConnectedComponents` - A connected component is a set of nodes in a graph where each node is reachable from any other node in the same set. This function counts the number in the FeatureCollection.
+```typescript
+const graph = new LineStringGraph(network);
+
+// Return all nodes in the graph as FeatureCollection<Point>, where each unique node is a Feature<Point>
+const graphPoints = graph.getNodes();
+
+// Return all the unique edges as FeatureCollection<LineString>, where each unique edge is a Feature<LineString>
+const graphEdges = graph.getEdges(); 
+
+// The longest possible shortest path in the graph between two nodes (i.e. graph diameter)
+const longestShortestPath = graph.getMaxLengthShortestPath()
+```
 
 ## Benchmarks
 

@@ -1,0 +1,17 @@
+.buttons {
+  position: relative;
+  top: 0;
+  z-index: 1000;
+  margin: auto;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+@media screen and (max-width: 900px) {
+  .buttons {
+    width: 85%;
+    margin: auto;
+    margin-left: 45px;
+  }
+}
