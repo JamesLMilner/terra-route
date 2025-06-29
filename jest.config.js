@@ -10,6 +10,7 @@ export default {
     "<rootDir>/demo/",
     "<rootDir>/coverage/",
     "<rootDir>/src/fixtures.ts",
+    "<rootDir>/scratch/",
   ],
   collectCoverage: true,
   coveragePathIgnorePatterns: ["<rootDir>/src/test-utils", "<rootDir>/src/heap/heap.d.ts",],

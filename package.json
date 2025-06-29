@@ -1,6 +1,6 @@
 {
     "name": "terra-route",
-    "version": "0.0.7",
+    "version": "0.0.9",
     "description": "A library for routing along GeoJSON LineString networks",
     "scripts": {
         "docs": "typedoc",
@@ -60,7 +60,11 @@
         "network",
         "geospatial",
         "astar",
-        "djikstra"
+        "djikstra",
+        "graph",
+        "pathfinder",
+        "path",
+        "ngraph.graph"
     ],
     "knip": {
         "$schema": "https://unpkg.com/knip@5/schema.json",
