@@ -1,5 +1,5 @@
 import { Position, Feature, Point, LineString, FeatureCollection } from "geojson";
-import { haversineDistance } from "../terra-route";
+import { haversineDistance } from "../distance/haversine";
 
 /**
  * Calculates the total length of a LineString route in meters.

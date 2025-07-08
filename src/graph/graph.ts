@@ -1,8 +1,11 @@
 import { Feature, FeatureCollection, LineString, Point } from "geojson";
 import { graphGetConnectedComponentCount, graphGetConnectedComponents } from "./methods/connected";
 import { graphGetNodeAndEdgeCount, graphGetNodesAsPoints } from "./methods/nodes";
-import { graphGetUniqueSegments } from "./methods/unique-segments";
+import { graphGetUniqueSegments } from "./methods/unique";
 import { routeLength } from "../test-utils/utils";
+import { removeDuplicateAndSubsectionLines } from "./methods/duplicates";
+import { getLeafEdges } from "./methods/leaf";
+import { getNetworkInBoundingBox, BoundingBox } from "./methods/bounding-box";
 
 /**
  * Represents a graph constructed from a GeoJSON FeatureCollection of LineString features.
@@ -31,6 +34,24 @@ export class LineStringGraph {
      */
     getNetwork(): FeatureCollection<LineString> {
         return this.network;
+    }
+
+    /**
+     * Gets a filtered network containing only LineStrings that are completely within the specified bounding box.
+     * @param boundingBox A bounding box array in the format [minLng, minLat, maxLng, maxLat]
+     * @returns A GeoJSON FeatureCollection of LineString features representing the network filtered by the bounding box.
+     */
+    getNetworkInBoundingBox(boundingBox: BoundingBox): FeatureCollection<LineString> {
+        return getNetworkInBoundingBox(this.network, boundingBox);
+    }
+
+    /**
+     * Gets the network without duplicate or subsection lines. 
+     * This method processes the network to remove any duplicate lines or lines that are subsections of other lines.
+     * @returns A FeatureCollection<LineString> representing the network without duplicate or subsection lines.
+     */
+    getNetworkWithoutDuplicatesOrSubsections() {
+        return removeDuplicateAndSubsectionLines(this.network);
     }
 
     /**
@@ -147,5 +168,35 @@ export class LineStringGraph {
     getEdgeCount(): number {
         const { edgeCount } = this.getNodeAndEdgeCount();
         return edgeCount;
+    }
+
+    /**
+     * Gets the leaf edges of the graph. A leaf edge is defined as an edge whose start or end node has a degree of 1.
+     * Here an edge is defined as a LineString with two coordinates, representing the start and end points.
+     * @returns A FeatureCollection<LineString> containing only the leaf edges of the graph.
+     */
+    getLeafEdges(): FeatureCollection<LineString> {
+        return getLeafEdges(this.network).leafEdges;
+    }
+
+    /**
+     * Returns the pruned network, which is the network without the leaf edges.
+     * i.e. This method removes all leaf edges from the network, leaving only the non-leaf edges
+     * @return A FeatureCollection<LineString> representing the pruned network without leaf edges.
+     */
+    getPrunedEdges(depth?: number): FeatureCollection<LineString> {
+        if (depth && depth > 0) {
+
+            let currentEdges = this.network;
+
+            for (let i = 0; i < depth; i++) {
+                const leafEdges = getLeafEdges(currentEdges);
+                currentEdges = leafEdges.nonLeafEdges;
+            }
+
+            return currentEdges;
+
+        }
+        return getLeafEdges(this.network).nonLeafEdges;
     }
 }
