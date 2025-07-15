@@ -1,4 +1,10 @@
-# Terra Route
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/logo-dark-mode.png">
+  <source media="(prefers-color-scheme: light)" srcset="./assets/logo.png">
+  <img alt="Terra Draw logo" src="./assets/logo.png" width="400px">
+</picture>
+
+<p></p>
 
 Terra Route aims to be a fast library for routing on GeoJSON LineStrings networks, where LineStrings share identical coordinates. Terra Routes main aim is currently performance - it uses A* to help achieve this.
 
@@ -20,62 +26,20 @@ Here is a short example of how to use the TerraRoute class:
 import { FeatureCollection, LineString, Point, Feature } from "geojson";
 import { TerraRoute } from "terra-route"; 
 
-// Sample GeoJSON network (a simple "L" shape)
-const network: FeatureCollection<LineString> = {
-  type: "FeatureCollection",
-  features: [
-    {
-      type: "Feature",
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [0, 0],   // A
-          [0, 1],   // B
-          [0, 2],   // C
-        ],
-      },
-      properties: {},
-    },
-    {
-      type: "Feature",
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [0, 1],   // B
-          [1, 1],   // D
-        ],
-      },
-      properties: {},
-    },
-  ],
-};
-
-// Define start and end points (A and D)
-const startPoint: Feature<Point> = {
-  type: "Feature",
-  geometry: {
-    type: "Point",
-    coordinates: [0, 0], // Point A
-  },
-  properties: {},
-};
-
-const endPoint: Feature<Point> = {
-  type: "Feature",
-  geometry: {
-    type: "Point",
-    coordinates: [1, 1], // Point D
-  },
-  properties: {},
-};
+// We omit the literal values here in the README for brevity
+import { network, startPoint, endPoint } from './network'
 
 // Initialize TerraRoute instance
 const router = new TerraRoute();
 
-// We must build the route graph first before calling getRoute
+// network here is a FeatureCollection<LineString> where the all
+// identical coordinates are considered connected. 
+// We must build the route graph first before calling getRoute.
 router.buildRouteGraph(network);
 
-// Get shortest route
+// Get shortest route where startPoint and endpoint are Feature<Point> of 
+// a coordinate node which is present on the network (i.e. the coordinate 
+// exists in one of the linestrings)
 const route = router.getRoute(startPoint, endPoint);
 
 console.log("Shortest route:", JSON.stringify(route, null, 2));
