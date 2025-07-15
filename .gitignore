@@ -5,3 +5,4 @@ coverage/
 scratch/
 cli/
 .DS_Store
+tools/osm/download

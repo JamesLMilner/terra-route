@@ -6,6 +6,7 @@ import { routeLength } from "../test-utils/utils";
 import { removeDuplicateAndSubsectionLines } from "./methods/duplicates";
 import { getLeafEdges } from "./methods/leaf";
 import { getNetworkInBoundingBox, BoundingBox } from "./methods/bounding-box";
+import { unifyCloseCoordinates } from "./methods/unify";
 
 /**
  * Represents a graph constructed from a GeoJSON FeatureCollection of LineString features.
@@ -198,5 +199,14 @@ export class LineStringGraph {
 
         }
         return getLeafEdges(this.network).nonLeafEdges;
+    }
+
+    /**
+     * Returns the network where all nodes that are with n meters of each other are unified. 
+     * The function will avoid unifying coordinates in the same linestring.
+     * @param toleranceMeters the tolerance for unifying nodes in meters. 
+     */
+    getUnifiedNetwork(toleranceMeters: number) {
+        return unifyCloseCoordinates(this.network, toleranceMeters);
     }
 }
