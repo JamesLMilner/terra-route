@@ -157,7 +157,6 @@ describe("LineStringGraph", () => {
         expect(graphAfterThirdPrune.features.length).toBeLessThan(graphAfterSecondPrune.features.length);
     });
 
-
     describe('getNetworkInBoundingBox', () => {
         it('filters network LineStrings based on bounding box', () => {
             const insideLine = createLineStringFeature([[1, 1], [2, 2]]);
@@ -201,6 +200,38 @@ describe("LineStringGraph", () => {
             // Modifying filtered result shouldn't affect original
             filteredNetwork.features.pop();
             expect(graph.getNetwork().features).toHaveLength(1);
+        });
+    });
+
+    describe('getUnifiedNetwork', () => {
+        it('returns the unified network', () => {
+            const insideLine = createLineStringFeature([[1, 1], [2, 2]]);
+            const outsideLine = createLineStringFeature([[1.000001, 1.000001], [20, 20]]);
+
+            const network = createFeatureCollection([insideLine, outsideLine]);
+            const graph = new LineStringGraph(network);
+
+            const filteredNetwork = graph.getUnifiedNetwork(0.5);
+
+            expect(filteredNetwork.features).toHaveLength(2);
+            expect(filteredNetwork.features).toEqual([
+                {
+                    "geometry": {
+                        "coordinates": [[1, 1], [2, 2]],
+                        "type": "LineString"
+                    },
+                    "properties": {},
+                    "type": "Feature"
+                },
+                {
+                    "geometry": {
+                        "coordinates": [[1, 1], [20, 20]],
+                        "type": "LineString"
+                    },
+                    "properties": {},
+                    "type": "Feature"
+                }
+            ]);
         });
     });
 

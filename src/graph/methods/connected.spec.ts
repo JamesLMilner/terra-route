@@ -2,7 +2,8 @@ import { FeatureCollection, LineString } from 'geojson';
 import { graphGetConnectedComponentCount, graphGetConnectedComponents } from './connected';
 import { generateTreeFeatureCollection } from '../../test-utils/generate-network';
 import { createFeatureCollection, createLineStringFeature } from '../../test-utils/create';
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
+import { unifyCloseCoordinates } from './unify';
 
 describe('countConnectedComponents', () => {
     describe('for an empty feature collection', () => {
@@ -214,4 +215,5 @@ describe('splitIntoConnectedComponents', () => {
         const countMultipleCC = graphGetConnectedComponentCount(networkMultipleCC);
         expect(componentsMultipleCC.length).toBe(countMultipleCC);
     });
+
 })

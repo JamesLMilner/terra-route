@@ -23,5 +23,6 @@ export const haversineDistance = (pointOne: Position, pointTwo: Position): numbe
     const distance = radius * c;
 
 
+    // Convert distance from meters to kilometers
     return distance / 1000;
 }
