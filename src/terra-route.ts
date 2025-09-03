@@ -20,6 +20,12 @@ class TerraRoute implements Router {
     private coordinates: Position[] = [];
     private adjacencyList: Array<Array<{ node: number; distance: number }>> = [];
 
+    // Reusable typed scratch buffers for A*
+    private gScoreScratch: Float64Array | null = null;
+    private cameFromScratch: Int32Array | null = null;
+    private visitedScratch: Uint8Array | null = null;
+    private scratchCapacity = 0;
+
     constructor(options?: {
         distanceMeasurement?: (a: Position, b: Position) => number;
         heap?: HeapConstructor;
@@ -29,16 +35,12 @@ class TerraRoute implements Router {
     }
 
     /**
-     * Converts a coordinate into a unique index. If the coordinate already exists, returns its index.
-     * Otherwise, assigns a new index and stores the coordinate.
-     * 
-     * @param coord - A GeoJSON Position array representing [longitude, latitude].
-     * @returns A unique numeric index for the coordinate.
+     * Builds a graph (adjacency list) from a LineString FeatureCollection.
      */
     public buildRouteGraph(network: FeatureCollection<LineString>): void {
         this.network = network;
 
-        // Reset everything
+        // Reset
         this.coordinateIndexMap = new Map();
         this.coordinates = [];
         this.adjacencyList = [];
@@ -49,43 +51,48 @@ class TerraRoute implements Router {
         const adjListLocal = this.adjacencyList;
         const measureDistance = this.distanceMeasurement;
 
-        for (const feature of network.features) {
+        const features = network.features;
+        for (let f = 0, fLen = features.length; f < fLen; f++) {
+            const feature = features[f];
             const lineCoords = feature.geometry.coordinates;
 
-            for (let i = 0; i < lineCoords.length - 1; i++) {
-                const [lngA, latA] = lineCoords[i];
-                const [lngB, latB] = lineCoords[i + 1];
+            for (let i = 0, len = lineCoords.length - 1; i < len; i++) {
+                const a = lineCoords[i];
+                const b = lineCoords[i + 1];
 
-                // get or assign index for A 
+                const lngA = a[0], latA = a[1];
+                const lngB = b[0], latB = b[1];
+
+                // get or assign index for A
                 let latMapA = coordIndexMapLocal.get(lngA);
-                if (!latMapA) {
+                if (latMapA === undefined) {
                     latMapA = new Map<number, number>();
                     coordIndexMapLocal.set(lngA, latMapA);
                 }
                 let indexA = latMapA.get(latA);
                 if (indexA === undefined) {
                     indexA = coordsLocal.length;
-                    coordsLocal.push(lineCoords[i]);
+                    coordsLocal.push(a);
                     latMapA.set(latA, indexA);
                     adjListLocal[indexA] = [];
                 }
 
-                // get or assign index for B 
+                // get or assign index for B
                 let latMapB = coordIndexMapLocal.get(lngB);
-                if (!latMapB) {
+                if (latMapB === undefined) {
                     latMapB = new Map<number, number>();
                     coordIndexMapLocal.set(lngB, latMapB);
                 }
                 let indexB = latMapB.get(latB);
                 if (indexB === undefined) {
                     indexB = coordsLocal.length;
-                    coordsLocal.push(lineCoords[i + 1]);
+                    coordsLocal.push(b);
                     latMapB.set(latB, indexB);
                     adjListLocal[indexB] = [];
                 }
 
-                // record the bidirectional edge 
-                const segmentDistance = measureDistance(lineCoords[i], lineCoords[i + 1]);
+                // record the bidirectional edge
+                const segmentDistance = measureDistance(a, b);
                 adjListLocal[indexA].push({ node: indexB, distance: segmentDistance });
                 adjListLocal[indexB].push({ node: indexA, distance: segmentDistance });
             }
@@ -93,23 +100,17 @@ class TerraRoute implements Router {
     }
 
     /**
-    * Computes the shortest route between two points in the network using the A* algorithm.
-    * 
-    * @param start - A GeoJSON Point Feature representing the start location.
-    * @param end - A GeoJSON Point Feature representing the end location.
-    * @returns A GeoJSON LineString Feature representing the shortest path, or null if no path is found.
-    * 
-    * @throws Error if the network has not been built yet with buildRouteGraph(network).
-    */
+     * Computes the shortest route between two points using A*.
+     */
     public getRoute(
         start: Feature<Point>,
         end: Feature<Point>
     ): Feature<LineString> | null {
-        if (!this.network) {
+        if (this.network === null) {
             throw new Error("Network not built. Please call buildRouteGraph(network) first.");
         }
 
-        // ensure start/end are in the index maps
+        // Ensure start/end exist in index maps
         const startIndex = this.getOrCreateIndex(start.geometry.coordinates);
         const endIndex = this.getOrCreateIndex(end.geometry.coordinates);
 
@@ -117,36 +118,54 @@ class TerraRoute implements Router {
             return null;
         }
 
+        // Local aliases
+        const coords = this.coordinates;
+        const adj = this.adjacencyList;
+        const measureDistance = this.distanceMeasurement;
+
+        // Ensure and init scratch buffers
+        const nodeCount = coords.length;
+        this.ensureScratch(nodeCount);
+        // Non-null after ensure
+        const gScore = this.gScoreScratch!;
+        const cameFrom = this.cameFromScratch!;
+        const visited = this.visitedScratch!;
+        // Reset only the used range for speed
+        gScore.fill(Number.POSITIVE_INFINITY, 0, nodeCount);
+        cameFrom.fill(-1, 0, nodeCount);
+        visited.fill(0, 0, nodeCount);
+
         const openSet = new this.heapConstructor();
         openSet.insert(0, startIndex);
-
-        const nodeCount = this.coordinates.length;
-        const gScore = new Array<number>(nodeCount).fill(Infinity);
-        const cameFrom = new Array<number>(nodeCount).fill(-1);
-        const visited = new Array<boolean>(nodeCount).fill(false);
-
         gScore[startIndex] = 0;
+
+        const endCoord = coords[endIndex];
 
         while (openSet.size() > 0) {
             const current = openSet.extractMin()!;
-            if (visited[current]) {
+            if (visited[current] !== 0) {
                 continue;
             }
             if (current === endIndex) {
                 break;
             }
-            visited[current] = true;
+            visited[current] = 1;
 
-            for (const neighbor of this.adjacencyList[current] || []) {
-                const tentativeG = gScore[current] + neighbor.distance;
-                if (tentativeG < gScore[neighbor.node]) {
-                    gScore[neighbor.node] = tentativeG;
-                    cameFrom[neighbor.node] = current;
-                    const heuristic = this.distanceMeasurement(
-                        this.coordinates[neighbor.node],
-                        this.coordinates[endIndex]
-                    );
-                    openSet.insert(tentativeG + heuristic, neighbor.node);
+            const neighbors = adj[current];
+            if (neighbors === undefined) continue;
+
+            for (let i = 0, n = neighbors.length; i < n; i++) {
+                const nb = neighbors[i];
+                const nbNode = nb.node;
+
+                const tentativeG = gScore[current] + nb.distance;
+                if (tentativeG < gScore[nbNode]) {
+                    gScore[nbNode] = tentativeG;
+                    cameFrom[nbNode] = current;
+
+                    // A* priority = g + h
+                    const heuristic = measureDistance(coords[nbNode], endCoord);
+                    openSet.insert(tentativeG + heuristic, nbNode);
                 }
             }
         }
@@ -155,14 +174,15 @@ class TerraRoute implements Router {
             return null;
         }
 
-        // Reconstruct path
+        // Reconstruct path (push + reverse to avoid O(n^2) unshift)
         const path: Position[] = [];
-        let current = endIndex;
-        while (current !== startIndex) {
-            path.unshift(this.coordinates[current]);
-            current = cameFrom[current];
+        let cur = endIndex;
+        while (cur !== startIndex) {
+            path.push(coords[cur]);
+            cur = cameFrom[cur];
         }
-        path.unshift(this.coordinates[startIndex]);
+        path.push(coords[startIndex]);
+        path.reverse();
 
         return {
             type: "Feature",
@@ -175,21 +195,36 @@ class TerraRoute implements Router {
      * Helper to index start/end in getRoute.
      */
     private getOrCreateIndex(coord: Position): number {
-        const [lng, lat] = coord;
+        const lng = coord[0];
+        const lat = coord[1];
+
         let latMap = this.coordinateIndexMap.get(lng);
-        if (!latMap) {
+        if (latMap === undefined) {
             latMap = new Map<number, number>();
             this.coordinateIndexMap.set(lng, latMap);
         }
+
         let index = latMap.get(lat);
         if (index === undefined) {
             index = this.coordinates.length;
             this.coordinates.push(coord);
             latMap.set(lat, index);
-            // ensure adjacencyList covers this new node
             this.adjacencyList[index] = [];
         }
+
         return index;
+    }
+
+    // Ensure scratch arrays are allocated with at least `size` capacity.
+    private ensureScratch(size: number): void {
+        if (this.scratchCapacity >= size && this.gScoreScratch && this.cameFromScratch && this.visitedScratch) {
+            return;
+        }
+        const cap = size | 0;
+        this.gScoreScratch = new Float64Array(cap);
+        this.cameFromScratch = new Int32Array(cap);
+        this.visitedScratch = new Uint8Array(cap);
+        this.scratchCapacity = cap;
     }
 }
 
