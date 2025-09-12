@@ -1,190 +1,255 @@
-import { FeatureCollection, LineString, Point, Feature, Position } from "geojson";
-import { haversineDistance } from "./distance/haversine";
-import { createCheapRuler } from "./distance/cheap-ruler";
-import { MinHeap } from "./heap/min-heap";
-import { HeapConstructor } from "./heap/heap";
-import { LineStringGraph } from "./graph/graph";
+import { FeatureCollection, LineString, Point, Feature, Position } from "geojson"; // Import GeoJSON types
+import { haversineDistance } from "./distance/haversine"; // Great-circle distance function (default heuristic/edge weight)
+import { createCheapRuler } from "./distance/cheap-ruler"; // Factory for faster planar distance (exported for consumers)
+import { MinHeap } from "./heap/min-heap"; // Default binary heap for A*
+import { HeapConstructor } from "./heap/heap"; // Heap interface so users can plug custom heaps
+import { LineStringGraph } from "./graph/graph"; // Exported type (not used internally here)
 
-interface Router {
-    buildRouteGraph(network: FeatureCollection<LineString>): void;
-    getRoute(start: Feature<Point>, end: Feature<Point>): Feature<LineString> | null;
+interface Router { // Contract for a router implementation
+    buildRouteGraph(network: FeatureCollection<LineString>): void; // Build internal graph from GeoJSON LineStrings
+    getRoute(start: Feature<Point>, end: Feature<Point>): Feature<LineString> | null; // Compute a shortest path
 }
 
-class TerraRoute implements Router {
-    private network: FeatureCollection<LineString> | null = null;
-    private distanceMeasurement: (a: Position, b: Position) => number;
-    private heapConstructor: HeapConstructor;
+class TerraRoute implements Router { // Main router class implementing A*
+    private network: FeatureCollection<LineString> | null = null; // The last network used to build the graph
+    private distanceMeasurement: (a: Position, b: Position) => number; // Distance function used for edges and heuristic
+    private heapConstructor: HeapConstructor; // Heap class used by A*
 
-    // Map from longitude → (map from latitude → index)
-    private coordinateIndexMap: Map<number, Map<number, number>> = new Map();
-    private coordinates: Position[] = [];
-    private adjacencyList: Array<Array<{ node: number; distance: number }>> = [];
+    // Map from longitude → (map from latitude → index) to deduplicate coordinates and get node indices quickly
+    private coordinateIndexMap: Map<number, Map<number, number>> = new Map(); // Nested map for exact coord lookup
+    private coordinates: Position[] = []; // Array of all unique coordinates by index
+    // Sparse adjacency list used during build and for any nodes added dynamically later
+    private adjacencyList: Array<Array<{ node: number, distance: number }>> = []; // Per-node neighbor arrays used only pre-CSR or for dynamic nodes
+
+    // CSR adjacency representation for fast neighbor iteration in getRoute
+    private csrOffsets: Int32Array | null = null;      // Row pointer: length = nodeCount + 1, offsets into indices/distances
+    private csrIndices: Int32Array | null = null;      // Column indices: neighbor node IDs, length = totalEdges
+    private csrDistances: Float64Array | null = null;  // Edge weights aligned to csrIndices, length = totalEdges
+    private csrNodeCount = 0; // Number of nodes captured in the CSR arrays
 
     // Reusable typed scratch buffers for A*
-    private gScoreScratch: Float64Array | null = null;
-    private cameFromScratch: Int32Array | null = null;
-    private visitedScratch: Uint8Array | null = null;
-    private scratchCapacity = 0;
+    private gScoreScratch: Float64Array | null = null; // gScore per node (cost from start)
+    private cameFromScratch: Int32Array | null = null; // Predecessor per node for path reconstruction
+    private visitedScratch: Uint8Array | null = null; // Visited set to avoid reprocessing
+    private scratchCapacity = 0; // Current capacity of scratch arrays
 
     constructor(options?: {
-        distanceMeasurement?: (a: Position, b: Position) => number;
-        heap?: HeapConstructor;
+        distanceMeasurement?: (a: Position, b: Position) => number; // Optional distance function override
+        heap?: HeapConstructor; // Optional heap implementation override
     }) {
-        this.distanceMeasurement = options?.distanceMeasurement ?? haversineDistance;
-        this.heapConstructor = options?.heap ?? MinHeap;
+        this.distanceMeasurement = options?.distanceMeasurement ?? haversineDistance; // Default to haversine
+        this.heapConstructor = options?.heap ?? MinHeap; // Default to MinHeap
     }
 
     /**
      * Builds a graph (adjacency list) from a LineString FeatureCollection.
      */
     public buildRouteGraph(network: FeatureCollection<LineString>): void {
-        this.network = network;
+        this.network = network; // Keep a reference to the network
 
-        // Reset
-        this.coordinateIndexMap = new Map();
-        this.coordinates = [];
-        this.adjacencyList = [];
+        // Reset internal structures for a fresh build
+        this.coordinateIndexMap = new Map(); // Clear coordinate index map
+        this.coordinates = []; // Clear coordinates array
+        this.adjacencyList = []; // Clear adjacency list (sparse builder)
+        // Reset CSR structures (will rebuild below)
+        this.csrOffsets = null;
+        this.csrIndices = null;
+        this.csrDistances = null;
+        this.csrNodeCount = 0;
 
-        // Hoist to locals for speed
-        const coordIndexMapLocal = this.coordinateIndexMap;
-        const coordsLocal = this.coordinates;
-        const adjListLocal = this.adjacencyList;
-        const measureDistance = this.distanceMeasurement;
+        // Hoist to locals for speed (avoid repeated property lookups in hot loops)
+        const coordIndexMapLocal = this.coordinateIndexMap; // Local alias for coord map
+        const coordsLocal = this.coordinates; // Local alias for coordinates array
+        const adjListLocal = this.adjacencyList; // Local alias for adjacency list
+        const measureDistance = this.distanceMeasurement; // Local alias for distance function
 
-        const features = network.features;
-        for (let f = 0, fLen = features.length; f < fLen; f++) {
-            const feature = features[f];
-            const lineCoords = feature.geometry.coordinates;
+        const features = network.features; // All LineString features
+        for (let f = 0, fLen = features.length; f < fLen; f++) { // Iterate features
+            const feature = features[f]; // Current feature
+            const lineCoords = feature.geometry.coordinates; // Coordinates for this LineString
 
-            for (let i = 0, len = lineCoords.length - 1; i < len; i++) {
-                const a = lineCoords[i];
-                const b = lineCoords[i + 1];
+            for (let i = 0, len = lineCoords.length - 1; i < len; i++) { // Iterate segment pairs along the line
+                const a = lineCoords[i]; // Segment start coord
+                const b = lineCoords[i + 1]; // Segment end coord
 
-                const lngA = a[0], latA = a[1];
-                const lngB = b[0], latB = b[1];
+                const lngA = a[0], latA = a[1]; // Decompose A for map keys
+                const lngB = b[0], latB = b[1]; // Decompose B for map keys
 
                 // get or assign index for A
-                let latMapA = coordIndexMapLocal.get(lngA);
-                if (latMapA === undefined) {
+                let latMapA = coordIndexMapLocal.get(lngA); // Find latitude map for A's longitude
+                if (latMapA === undefined) { // If absent, create it
                     latMapA = new Map<number, number>();
                     coordIndexMapLocal.set(lngA, latMapA);
                 }
-                let indexA = latMapA.get(latA);
-                if (indexA === undefined) {
-                    indexA = coordsLocal.length;
-                    coordsLocal.push(a);
-                    latMapA.set(latA, indexA);
-                    adjListLocal[indexA] = [];
+                let indexA = latMapA.get(latA); // Look up node index for A
+                if (indexA === undefined) { // If new, assign a new index
+                    indexA = coordsLocal.length; // Next index is current length
+                    coordsLocal.push(a); // Store coordinate
+                    latMapA.set(latA, indexA); // Record in map
+                    adjListLocal[indexA] = []; // Init adjacency list for A
                 }
 
                 // get or assign index for B
-                let latMapB = coordIndexMapLocal.get(lngB);
-                if (latMapB === undefined) {
+                let latMapB = coordIndexMapLocal.get(lngB); // Find latitude map for B's longitude
+                if (latMapB === undefined) { // If absent, create it
                     latMapB = new Map<number, number>();
                     coordIndexMapLocal.set(lngB, latMapB);
                 }
-                let indexB = latMapB.get(latB);
-                if (indexB === undefined) {
-                    indexB = coordsLocal.length;
-                    coordsLocal.push(b);
-                    latMapB.set(latB, indexB);
-                    adjListLocal[indexB] = [];
+                let indexB = latMapB.get(latB); // Look up node index for B
+                if (indexB === undefined) { // If new, assign a new index
+                    indexB = coordsLocal.length; // Next index is current length
+                    coordsLocal.push(b); // Store coordinate
+                    latMapB.set(latB, indexB); // Record in map
+                    adjListLocal[indexB] = []; // Init adjacency list for B
                 }
 
                 // record the bidirectional edge
-                const segmentDistance = measureDistance(a, b);
-                adjListLocal[indexA].push({ node: indexB, distance: segmentDistance });
-                adjListLocal[indexB].push({ node: indexA, distance: segmentDistance });
+                const segmentDistance = measureDistance(a, b); // Compute edge weight between A and B
+                adjListLocal[indexA].push({ node: indexB, distance: segmentDistance }); // Add edge A → B
+                adjListLocal[indexB].push({ node: indexA, distance: segmentDistance }); // Add edge B → A
             }
         }
+
+        // Build CSR representation from adjacencyList for faster neighbor iteration
+        const nodeCount = this.coordinates.length; // Total nodes
+        this.csrNodeCount = nodeCount; // Remember how many nodes CSR covers
+        let totalEdges = 0; // Accumulate total number of adjacency entries
+        for (let i = 0; i < nodeCount; i++) { // Sum degrees
+            const list = this.adjacencyList[i]; // Neighbors for node i
+            if (list) totalEdges += list.length; // Add degree if exists
+        }
+        const offsets = new Int32Array(nodeCount + 1); // Allocate row pointer array
+        for (let i = 0; i < nodeCount; i++) { // Compute prefix sums of degrees
+            const deg = this.adjacencyList[i]?.length ?? 0; // Degree of node i
+            offsets[i + 1] = offsets[i] + deg; // Next offset is previous + degree
+        }
+        const indices = new Int32Array(totalEdges); // Allocate neighbor indices array
+        const distances = new Float64Array(totalEdges); // Allocate distances array
+        // Cursor copy of offsets for writing
+        const cursor = offsets.slice(); // Copy offsets so we can increment as we place entries
+        for (let u = 0; u < nodeCount; u++) { // For each node
+            const list = this.adjacencyList[u]; // Its neighbor list
+            if (!list || list.length === 0) continue; // Skip empty
+            for (let k = 0; k < list.length; k++) { // For each neighbor entry
+                const pos = cursor[u]++; // Current write position for node u
+                indices[pos] = list[k].node; // Store neighbor node id
+                distances[pos] = list[k].distance; // Store corresponding distance
+            }
+        }
+        this.csrOffsets = offsets; // Save CSR offsets
+        this.csrIndices = indices; // Save CSR neighbor indices
+        this.csrDistances = distances; // Save CSR distances
+
+        // Drop heavy object-based neighbor arrays to reduce GC pressure;
+        // keep a sparse shell only for dynamically added nodes later.
+        this.adjacencyList = new Array(nodeCount); // Keep array shape but remove contents
     }
 
     /**
      * Computes the shortest route between two points using A*.
      */
     public getRoute(
-        start: Feature<Point>,
-        end: Feature<Point>
+        start: Feature<Point>, // Start point feature
+        end: Feature<Point> // End point feature
     ): Feature<LineString> | null {
-        if (this.network === null) {
+        if (this.network === null) { // Guard: graph must be built first
             throw new Error("Network not built. Please call buildRouteGraph(network) first.");
         }
 
         // Ensure start/end exist in index maps
-        const startIndex = this.getOrCreateIndex(start.geometry.coordinates);
-        const endIndex = this.getOrCreateIndex(end.geometry.coordinates);
+        const startIndex = this.getOrCreateIndex(start.geometry.coordinates); // Get or insert start node index
+        const endIndex = this.getOrCreateIndex(end.geometry.coordinates); // Get or insert end node index
 
-        if (startIndex === endIndex) {
-            return null;
+        if (startIndex === endIndex) { // Trivial case: same node
+            return null; // No path needed
         }
 
         // Local aliases
-        const coords = this.coordinates;
-        const adj = this.adjacencyList;
-        const measureDistance = this.distanceMeasurement;
+        const coords = this.coordinates; // Alias to coordinates array
+        const adj = this.adjacencyList; // Alias to sparse adjacency list (for dynamic nodes)
+        const measureDistance = this.distanceMeasurement; // Alias to distance function
 
         // Ensure and init scratch buffers
-        const nodeCount = coords.length;
-        this.ensureScratch(nodeCount);
+        const nodeCount = coords.length; // Current number of nodes (may be >= csrNodeCount if new nodes added)
+        this.ensureScratch(nodeCount); // Allocate scratch arrays if needed
         // Non-null after ensure
-        const gScore = this.gScoreScratch!;
-        const cameFrom = this.cameFromScratch!;
-        const visited = this.visitedScratch!;
+        const gScore = this.gScoreScratch!; // gScore pointer
+        const cameFrom = this.cameFromScratch!; // cameFrom pointer
+        const visited = this.visitedScratch!; // visited pointer
         // Reset only the used range for speed
-        gScore.fill(Number.POSITIVE_INFINITY, 0, nodeCount);
-        cameFrom.fill(-1, 0, nodeCount);
-        visited.fill(0, 0, nodeCount);
+        gScore.fill(Number.POSITIVE_INFINITY, 0, nodeCount); // Init gScore to +∞
+        cameFrom.fill(-1, 0, nodeCount); // Init predecessors to -1 (unknown)
+        visited.fill(0, 0, nodeCount); // Init visited flags to 0
 
-        const openSet = new this.heapConstructor();
-        openSet.insert(0, startIndex);
-        gScore[startIndex] = 0;
+        const openSet = new this.heapConstructor(); // Create min-heap (priority queue)
+        openSet.insert(0, startIndex); // Insert start with f = 0
+        gScore[startIndex] = 0; // g(start) = 0
 
-        const endCoord = coords[endIndex];
+        const endCoord = coords[endIndex]; // Cache end coordinate for heuristic
 
-        while (openSet.size() > 0) {
-            const current = openSet.extractMin()!;
-            if (visited[current] !== 0) {
+        while (openSet.size() > 0) { // Main A* loop until queue empty
+            const current = openSet.extractMin()!; // Pop node with smallest f
+            if (visited[current] !== 0) { // Skip if already finalized
                 continue;
             }
-            if (current === endIndex) {
+            if (current === endIndex) { // Early exit if reached goal
                 break;
             }
-            visited[current] = 1;
+            visited[current] = 1; // Mark as visited
 
-            const neighbors = adj[current];
-            if (neighbors === undefined) continue;
+            // Prefer CSR neighbors if available for this node, fall back to sparse list for dynamically added nodes
+            const csrOffsets = this.csrOffsets; // Local CSR offsets
+            const csrIndices = this.csrIndices; // Local CSR neighbors
+            const csrDistances = this.csrDistances; // Local CSR weights
+            if (csrOffsets && csrIndices && csrDistances && current < this.csrNodeCount) { // Use CSR fast path
+                const startOff = csrOffsets[current]; // Row start for current
+                const endOff = csrOffsets[current + 1]; // Row end for current
+                for (let i = startOff; i < endOff; i++) { // Iterate neighbors in CSR slice
+                    const nbNode = csrIndices[i]; // Neighbor node id
+                    const tentativeG = gScore[current] + csrDistances[i]; // g' = g(current) + w(current, nb)
+                    if (tentativeG < gScore[nbNode]) { // Relaxation check
+                        gScore[nbNode] = tentativeG; // Update best g
+                        cameFrom[nbNode] = current; // Track predecessor
+                        // A* priority = g + h
+                        const heuristic = measureDistance(coords[nbNode], endCoord); // h(nb)
+                        openSet.insert(tentativeG + heuristic, nbNode); // Push/update neighbor into open set
+                    }
+                }
+            } else { // Fallback: use sparse adjacency (only for nodes added after CSR build)
+                const neighbors = adj[current]; // Neighbor list for current
+                if (!neighbors || neighbors.length === 0) continue; // No neighbors
+                for (let i = 0, n = neighbors.length; i < n; i++) { // Iterate neighbors
+                    const nb = neighbors[i]; // Neighbor entry
+                    const nbNode = nb.node; // Neighbor id
 
-            for (let i = 0, n = neighbors.length; i < n; i++) {
-                const nb = neighbors[i];
-                const nbNode = nb.node;
+                    const tentativeG = gScore[current] + nb.distance; // g' via current
+                    if (tentativeG < gScore[nbNode]) { // Relax if better
+                        gScore[nbNode] = tentativeG; // Update best g
+                        cameFrom[nbNode] = current; // Track predecessor
 
-                const tentativeG = gScore[current] + nb.distance;
-                if (tentativeG < gScore[nbNode]) {
-                    gScore[nbNode] = tentativeG;
-                    cameFrom[nbNode] = current;
-
-                    // A* priority = g + h
-                    const heuristic = measureDistance(coords[nbNode], endCoord);
-                    openSet.insert(tentativeG + heuristic, nbNode);
+                        // A* priority = g + h
+                        const heuristic = measureDistance(coords[nbNode], endCoord); // Heuristic to goal
+                        openSet.insert(tentativeG + heuristic, nbNode); // Enqueue neighbor
+                    }
                 }
             }
         }
 
-        if (cameFrom[endIndex] < 0) {
-            return null;
+        if (cameFrom[endIndex] < 0) { // If goal was never reached/relaxed
+            return null; // No path found
         }
 
         // Reconstruct path (push + reverse to avoid O(n^2) unshift)
-        const path: Position[] = [];
-        let cur = endIndex;
-        while (cur !== startIndex) {
-            path.push(coords[cur]);
-            cur = cameFrom[cur];
+        const path: Position[] = []; // Accumulator for path coordinates
+        let cur = endIndex; // Start from goal
+        while (cur !== startIndex) { // Walk predecessors back to start
+            path.push(coords[cur]); // Push current coordinate
+            cur = cameFrom[cur]; // Move to predecessor
         }
-        path.push(coords[startIndex]);
-        path.reverse();
+        path.push(coords[startIndex]); // Include start coordinate
+        path.reverse(); // Reverse to get start→end order
 
-        return {
+        return { // Return a LineString feature representing the route
             type: "Feature",
             geometry: { type: "LineString", coordinates: path },
             properties: {},
@@ -194,38 +259,60 @@ class TerraRoute implements Router {
     /**
      * Helper to index start/end in getRoute.
      */
-    private getOrCreateIndex(coord: Position): number {
-        const lng = coord[0];
-        const lat = coord[1];
+    private getOrCreateIndex(coord: Position): number { // Ensure a coordinate has a node index, creating if absent
+        const lng = coord[0]; // Extract longitude
+        const lat = coord[1]; // Extract latitude
 
-        let latMap = this.coordinateIndexMap.get(lng);
-        if (latMap === undefined) {
+        let latMap = this.coordinateIndexMap.get(lng); // Get lat→index map for this longitude
+        if (latMap === undefined) { // Create if missing
             latMap = new Map<number, number>();
             this.coordinateIndexMap.set(lng, latMap);
         }
 
-        let index = latMap.get(lat);
-        if (index === undefined) {
-            index = this.coordinates.length;
-            this.coordinates.push(coord);
-            latMap.set(lat, index);
-            this.adjacencyList[index] = [];
+        let index = latMap.get(lat); // Lookup index by latitude
+        if (index === undefined) { // If not found, append new node
+            index = this.coordinates.length; // New index at end
+            this.coordinates.push(coord); // Store coordinate
+            latMap.set(lat, index); // Record mapping
+            // Ensure sparse adjacency slot for dynamically added nodes
+            this.adjacencyList[index] = []; // Init empty neighbor array
+            // Extend CSR offsets to keep indices consistent (no neighbors for new node)
+            if (this.csrOffsets && this.csrIndices && this.csrDistances) { // Only adjust if CSR already built
+                // Only need to expand offsets by one; indices/distances remain unchanged
+                const oldCount = this.csrNodeCount; // Nodes currently covered by CSR
+                if (index === oldCount) { // Appending exactly one new node at the end
+                    const newOffsets = new Int32Array(oldCount + 2); // Allocate offsets for +1 node
+                    newOffsets.set(this.csrOffsets, 0); // Copy previous offsets
+                    // last offset repeats to indicate zero neighbors
+                    newOffsets[oldCount + 1] = newOffsets[oldCount]; // Replicate last pointer
+                    this.csrOffsets = newOffsets; // Swap in new offsets
+                    this.csrNodeCount = oldCount + 1; // Increment CSR node count
+                } else if (index > oldCount) { // Appended beyond expectation (rare)
+                    // If somehow appended beyond expected, grow offsets accordingly
+                    const newOffsets = new Int32Array(index + 1); // Create larger offsets array
+                    newOffsets.set(this.csrOffsets, 0); // Copy old
+                    const last = this.csrOffsets[this.csrOffsets.length - 1]; // Last pointer value
+                    for (let i = this.csrOffsets.length; i < newOffsets.length; i++) newOffsets[i] = last; // Fill repeats
+                    this.csrOffsets = newOffsets; // Swap in expanded offsets
+                    this.csrNodeCount = index; // Update CSR node count to new last index
+                }
+            }
         }
 
-        return index;
+        return index; // Return node index
     }
 
     // Ensure scratch arrays are allocated with at least `size` capacity.
-    private ensureScratch(size: number): void {
-        if (this.scratchCapacity >= size && this.gScoreScratch && this.cameFromScratch && this.visitedScratch) {
-            return;
+    private ensureScratch(size: number): void { // Grow scratch buffers if capacity too small
+        if (this.scratchCapacity >= size && this.gScoreScratch && this.cameFromScratch && this.visitedScratch) { // If already big enough
+            return; // Nothing to do
         }
-        const cap = size | 0;
-        this.gScoreScratch = new Float64Array(cap);
-        this.cameFromScratch = new Int32Array(cap);
-        this.visitedScratch = new Uint8Array(cap);
-        this.scratchCapacity = cap;
+        const cap = size | 0; // Ensure integer capacity
+        this.gScoreScratch = new Float64Array(cap); // Allocate gScore buffer
+        this.cameFromScratch = new Int32Array(cap); // Allocate cameFrom buffer
+        this.visitedScratch = new Uint8Array(cap); // Allocate visited buffer
+        this.scratchCapacity = cap; // Record capacity
     }
 }
 
-export { TerraRoute, createCheapRuler, haversineDistance, LineStringGraph }
+export { TerraRoute, createCheapRuler, haversineDistance, LineStringGraph } // Export public API
