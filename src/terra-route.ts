@@ -218,10 +218,10 @@ class TerraRoute implements Router { // Main router class implementing A*
             visited[current] = 1; // Mark as visited
 
             // Prefer CSR neighbors if available for this node, fall back to sparse list for dynamically added nodes
-            const csrOffsets = this.csrOffsets; // Local CSR offsets
-            const csrIndices = this.csrIndices; // Local CSR neighbors
-            const csrDistances = this.csrDistances; // Local CSR weights
-            if (csrOffsets && csrIndices && csrDistances && current < this.csrNodeCount) { // Use CSR fast path
+            if (this.csrOffsets && current < this.csrNodeCount) { // Use CSR fast path
+                const csrOffsets = this.csrOffsets!; // Local CSR offsets (non-null here)
+                const csrIndices = this.csrIndices!; // Local CSR neighbors
+                const csrDistances = this.csrDistances!; // Local CSR weights
                 const startOff = csrOffsets[current]; // Row start for current
                 const endOff = csrOffsets[current + 1]; // Row end for current
                 for (let i = startOff; i < endOff; i++) { // Iterate neighbors in CSR slice
@@ -299,7 +299,7 @@ class TerraRoute implements Router { // Main router class implementing A*
             // Ensure sparse adjacency slot for dynamically added nodes
             this.adjacencyList[index] = []; // Init empty neighbor array
             // Extend CSR offsets to keep indices consistent (no neighbors for new node)
-            if (this.csrOffsets && this.csrIndices && this.csrDistances) { // Only adjust if CSR already built
+            if (this.csrOffsets) { // Only adjust if CSR already built
                 // Only need to expand offsets by one; indices/distances remain unchanged
                 const oldCount = this.csrNodeCount; // Nodes currently covered by CSR
                 if (index === oldCount) { // Appending exactly one new node at the end
@@ -309,14 +309,6 @@ class TerraRoute implements Router { // Main router class implementing A*
                     newOffsets[oldCount + 1] = newOffsets[oldCount]; // Replicate last pointer
                     this.csrOffsets = newOffsets; // Swap in new offsets
                     this.csrNodeCount = oldCount + 1; // Increment CSR node count
-                } else if (index > oldCount) { // Appended beyond expectation (rare)
-                    // If somehow appended beyond expected, grow offsets accordingly
-                    const newOffsets = new Int32Array(index + 1); // Create larger offsets array
-                    newOffsets.set(this.csrOffsets, 0); // Copy old
-                    const last = this.csrOffsets[this.csrOffsets.length - 1]; // Last pointer value
-                    for (let i = this.csrOffsets.length; i < newOffsets.length; i++) newOffsets[i] = last; // Fill repeats
-                    this.csrOffsets = newOffsets; // Swap in expanded offsets
-                    this.csrNodeCount = index; // Update CSR node count to new last index
                 }
             }
         }
