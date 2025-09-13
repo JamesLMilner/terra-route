@@ -10,7 +10,7 @@ export const CreateTerraRouteBenchmark = ({
     pairs,
     enabled
 }: BenchmarkProps) => createRoutingBenchmark(
-    'Terra Route (Default Four-ary Heap)',
+    'Terra Route',
     () => {
         const terraRoute = new TerraRoute();
         terraRoute.buildRouteGraph(network);

@@ -1,17 +1,16 @@
 import { FeatureCollection, LineString, Point, Feature, Position } from "geojson"; // Import GeoJSON types
 import { haversineDistance } from "./distance/haversine"; // Great-circle distance function (default heuristic/edge weight)
 import { createCheapRuler } from "./distance/cheap-ruler"; // Factory for faster planar distance (exported for consumers)
-import { MinHeap } from "./heap/min-heap"; // Default binary heap for A*
 import { HeapConstructor } from "./heap/heap"; // Heap interface so users can plug custom heaps
 import { LineStringGraph } from "./graph/graph"; // Exported type (not used internally here)
 import { FourAryHeap } from "./heap/four-ary-heap";
 
-interface Router { // Contract for a router implementation
-    buildRouteGraph(network: FeatureCollection<LineString>): void; // Build internal graph from GeoJSON LineStrings
-    getRoute(start: Feature<Point>, end: Feature<Point>): Feature<LineString> | null; // Compute a shortest path
+interface Router {
+    buildRouteGraph(network: FeatureCollection<LineString>): void;
+    getRoute(start: Feature<Point>, end: Feature<Point>): Feature<LineString> | null;
 }
 
-class TerraRoute implements Router { // Main router class implementing A*
+class TerraRoute implements Router {
     private network: FeatureCollection<LineString> | null = null; // The last network used to build the graph
     private distanceMeasurement: (a: Position, b: Position) => number; // Distance function used for edges and heuristic
     private heapConstructor: HeapConstructor; // Heap class used by A*
@@ -22,7 +21,7 @@ class TerraRoute implements Router { // Main router class implementing A*
     // Sparse adjacency list used during build and for any nodes added dynamically later
     private adjacencyList: Array<Array<{ node: number, distance: number }>> = []; // Per-node neighbor arrays used only pre-CSR or for dynamic nodes
 
-    // CSR adjacency representation for fast neighbor iteration in getRoute
+    // Compressed Sparse Row adjacency representation for fast neighbor iteration in getRoute
     private csrOffsets: Int32Array | null = null;      // Row pointer: length = nodeCount + 1, offsets into indices/distances
     private csrIndices: Int32Array | null = null;      // Column indices: neighbor node IDs, length = totalEdges
     private csrDistances: Float64Array | null = null;  // Edge weights aligned to csrIndices, length = totalEdges
@@ -183,7 +182,8 @@ class TerraRoute implements Router { // Main router class implementing A*
         const startIndex = this.getOrCreateIndex(start.geometry.coordinates); // Get or insert start node index
         const endIndex = this.getOrCreateIndex(end.geometry.coordinates); // Get or insert end node index
 
-        if (startIndex === endIndex) { // Trivial case: same node
+        // Trivial case: same node
+        if (startIndex === endIndex) {
             return null; // No path needed
         }
 
@@ -195,22 +195,31 @@ class TerraRoute implements Router { // Main router class implementing A*
         // Ensure and init scratch buffers
         const nodeCount = coords.length; // Current number of nodes (may be >= csrNodeCount if new nodes added)
         this.ensureScratch(nodeCount); // Allocate scratch arrays if needed
+
         // Non-null after ensure
         const gScore = this.gScoreScratch!; // gScore pointer
         const cameFrom = this.cameFromScratch!; // cameFrom pointer
         const visited = this.visitedScratch!; // visited pointer
         const hCache = this.hScratch!; // heuristic cache pointer
+
         // Reset only the used range for speed
         gScore.fill(Number.POSITIVE_INFINITY, 0, nodeCount); // Init gScore to +∞
         cameFrom.fill(-1, 0, nodeCount); // Init predecessors to -1 (unknown)
         visited.fill(0, 0, nodeCount); // Init visited flags to 0
         hCache.fill(-1, 0, nodeCount); // Init heuristic cache with sentinel (-1 means unknown)
 
-        const openSet = new this.heapConstructor(); // Create min-heap (priority queue)
+        // Create min-heap (priority queue)
+        const openSet = new this.heapConstructor();
+
         // Precompute heuristic for start to prime the queue cost
         const endCoord = coords[endIndex]; // Cache end coordinate for heuristic
         let hStart = hCache[startIndex];
-        if (hStart < 0) { hStart = measureDistance(coords[startIndex], endCoord); hCache[startIndex] = hStart; }
+
+        if (hStart < 0) {
+            hStart = measureDistance(coords[startIndex], endCoord);
+            hCache[startIndex] = hStart;
+        }
+
         openSet.insert(hStart, startIndex); // Insert start with f = g(0) + h(start)
         gScore[startIndex] = 0; // g(start) = 0
 
@@ -225,12 +234,14 @@ class TerraRoute implements Router { // Main router class implementing A*
             visited[current] = 1; // Mark as visited
 
             // Prefer CSR neighbors if available for this node, fall back to sparse list for dynamically added nodes
+
             if (this.csrOffsets && current < this.csrNodeCount) { // Use CSR fast path
                 const csrOffsets = this.csrOffsets!; // Local CSR offsets (non-null here)
                 const csrIndices = this.csrIndices!; // Local CSR neighbors
                 const csrDistances = this.csrDistances!; // Local CSR weights
                 const startOff = csrOffsets[current]; // Row start for current
                 const endOff = csrOffsets[current + 1]; // Row end for current
+
                 for (let i = startOff; i < endOff; i++) { // Iterate neighbors in CSR slice
                     const nbNode = csrIndices[i]; // Neighbor node id
                     const tentativeG = gScore[current] + csrDistances[i]; // g' = g(current) + w(current, nb)
@@ -243,7 +254,10 @@ class TerraRoute implements Router { // Main router class implementing A*
                         openSet.insert(tentativeG + hVal, nbNode); // Push/update neighbor into open set
                     }
                 }
-            } else { // Fallback: use sparse adjacency (only for nodes added after CSR build)
+            }
+            // Fallback: use sparse adjacency (only for nodes added after CSR build)
+            else {
+
                 const neighbors = adj[current]; // Neighbor list for current
                 if (!neighbors || neighbors.length === 0) continue; // No neighbors
                 for (let i = 0, n = neighbors.length; i < n; i++) { // Iterate neighbors
@@ -264,21 +278,25 @@ class TerraRoute implements Router { // Main router class implementing A*
             }
         }
 
-        if (cameFrom[endIndex] < 0) { // If goal was never reached/relaxed
-            return null; // No path found
+        // If goal was never reached/relaxed, return null
+        if (cameFrom[endIndex] < 0) {
+            return null;
         }
 
         // Reconstruct path (push + reverse to avoid O(n^2) unshift)
-        const path: Position[] = []; // Accumulator for path coordinates
-        let cur = endIndex; // Start from goal
-        while (cur !== startIndex) { // Walk predecessors back to start
-            path.push(coords[cur]); // Push current coordinate
-            cur = cameFrom[cur]; // Move to predecessor
+        const path: Position[] = [];
+        let cur = endIndex;
+        while (cur !== startIndex) {
+            path.push(coords[cur]);
+            cur = cameFrom[cur];
         }
-        path.push(coords[startIndex]); // Include start coordinate
-        path.reverse(); // Reverse to get start→end order
+        // Include start coordinate
+        path.push(coords[startIndex]);
 
-        return { // Return a LineString feature representing the route
+        // Reverse to get start→end order
+        path.reverse();
+
+        return {
             type: "Feature",
             geometry: { type: "LineString", coordinates: path },
             properties: {},
@@ -300,19 +318,26 @@ class TerraRoute implements Router { // Main router class implementing A*
 
         let index = latMap.get(lat); // Lookup index by latitude
         if (index === undefined) { // If not found, append new node
+
             index = this.coordinates.length; // New index at end
             this.coordinates.push(coord); // Store coordinate
             latMap.set(lat, index); // Record mapping
+
             // Ensure sparse adjacency slot for dynamically added nodes
             this.adjacencyList[index] = []; // Init empty neighbor array
+
             // Extend CSR offsets to keep indices consistent (no neighbors for new node)
             if (this.csrOffsets) { // Only adjust if CSR already built
+
                 // Only need to expand offsets by one; indices/distances remain unchanged
                 const oldCount = this.csrNodeCount; // Nodes currently covered by CSR
-                if (index === oldCount) { // Appending exactly one new node at the end
+
+                // Appending exactly one new node at the end
+                if (index === oldCount) {
                     const newOffsets = new Int32Array(oldCount + 2); // Allocate offsets for +1 node
                     newOffsets.set(this.csrOffsets, 0); // Copy previous offsets
-                    // last offset repeats to indicate zero neighbors
+
+                    // Last offset repeats to indicate zero neighbors
                     newOffsets[oldCount + 1] = newOffsets[oldCount]; // Replicate last pointer
                     this.csrOffsets = newOffsets; // Swap in new offsets
                     this.csrNodeCount = oldCount + 1; // Increment CSR node count
@@ -320,20 +345,26 @@ class TerraRoute implements Router { // Main router class implementing A*
             }
         }
 
-        return index; // Return node index
+        return index;
     }
 
     // Ensure scratch arrays are allocated with at least `size` capacity.
-    private ensureScratch(size: number): void { // Grow scratch buffers if capacity too small
-        if (this.scratchCapacity >= size && this.gScoreScratch && this.cameFromScratch && this.visitedScratch && this.hScratch) { // If already big enough
+    private ensureScratch(size: number): void {
+        const ifAlreadyBigEnough = this.scratchCapacity >= size
+            && this.gScoreScratch
+            && this.cameFromScratch
+            && this.visitedScratch
+            && this.hScratch;
+
+        if (ifAlreadyBigEnough) {
             return; // Nothing to do
         }
-        const cap = size | 0; // Ensure integer capacity
-        this.gScoreScratch = new Float64Array(cap); // Allocate gScore buffer
-        this.cameFromScratch = new Int32Array(cap); // Allocate cameFrom buffer
-        this.visitedScratch = new Uint8Array(cap); // Allocate visited buffer
-        this.hScratch = new Float64Array(cap); // Allocate heuristic cache buffer
-        this.scratchCapacity = cap; // Record capacity
+        const capacity = size | 0; // Ensure integer
+        this.gScoreScratch = new Float64Array(capacity);
+        this.cameFromScratch = new Int32Array(capacity);
+        this.visitedScratch = new Uint8Array(capacity);
+        this.hScratch = new Float64Array(capacity);
+        this.scratchCapacity = capacity;
     }
 }
 

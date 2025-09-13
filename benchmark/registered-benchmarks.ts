@@ -24,9 +24,9 @@ export const registeredBenchmarks = (network: FeatureCollection<LineString>, pai
 
         // Others
         CreateTerraRouteCheapRulerBenchmark({ ...parameters, enabled: false }),
-        CreateTerraRouteFibonacciBenchmark({ ...parameters, enabled: true }),
-        CreateTerraRoutePairingBenchmark({ ...parameters, enabled: true }),
-        CreateTerraRouteMinHeapBenchmark({ ...parameters, enabled: true }),
+        CreateTerraRouteFibonacciBenchmark({ ...parameters, enabled: false }),
+        CreateTerraRoutePairingBenchmark({ ...parameters, enabled: false }),
+        CreateTerraRouteMinHeapBenchmark({ ...parameters, enabled: false }),
         CreateTerraRouteCheapRulerBenchmark({ ...parameters, enabled: false }),
         CreateNgraphGraphBenchmark({ ...parameters, enabled: false }),
     ])
