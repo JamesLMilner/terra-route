@@ -1,5 +1,5 @@
 import { FeatureCollection, LineString, Position } from 'geojson';
-import { haversineDistance } from '../../terra-route';
+import { haversineDistance } from '../../distance/haversine';
 import { KDBush } from './spatial-index/kdbush';
 import { around } from './spatial-index/geokdbush';
 
