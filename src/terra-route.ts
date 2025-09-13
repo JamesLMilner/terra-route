@@ -4,6 +4,7 @@ import { createCheapRuler } from "./distance/cheap-ruler"; // Factory for faster
 import { MinHeap } from "./heap/min-heap"; // Default binary heap for A*
 import { HeapConstructor } from "./heap/heap"; // Heap interface so users can plug custom heaps
 import { LineStringGraph } from "./graph/graph"; // Exported type (not used internally here)
+import { FourAryHeap } from "./heap/four-ary-heap";
 
 interface Router { // Contract for a router implementation
     buildRouteGraph(network: FeatureCollection<LineString>): void; // Build internal graph from GeoJSON LineStrings
@@ -39,7 +40,7 @@ class TerraRoute implements Router { // Main router class implementing A*
         heap?: HeapConstructor; // Optional heap implementation override
     }) {
         this.distanceMeasurement = options?.distanceMeasurement ?? haversineDistance; // Default to haversine
-        this.heapConstructor = options?.heap ?? MinHeap; // Default to MinHeap
+        this.heapConstructor = options?.heap ?? FourAryHeap; // Default to MinHeap
     }
 
     /**
