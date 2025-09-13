@@ -6,7 +6,7 @@
 
 <p></p>
 
-Terra Route aims to be a fast library for routing on GeoJSON LineStrings networks, where LineStrings share identical coordinates. Terra Routes main aim is currently performance - it uses A* to help achieve this.
+Terra Route aims to be a fast library for routing on GeoJSON LineStrings networks, where LineStrings share identical coordinates. 
 
 ## Install
 
@@ -47,7 +47,7 @@ console.log("Shortest route:", JSON.stringify(route, null, 2));
 
 ## Additional Functionality
 
-Terra Route also exposes functionality for understanding GeoJSON route networks better called `LineStringGraph`. This can be useful for debugging as this class has a series of methods for determining things like unique nodes, edges, connected components as well as all their counts. With this class you can understand your graph better programmatically, for example determining it's size and if it is correctly connected.
+Terra Route provides a utility called LineStringGraph for analyzing GeoJSON route networks. This class is especially useful for debugging, as it includes methods to identify unique nodes, edges, and connected components, along with their counts. Beyond debugging, these methods help you programmatically explore and understand the structure of your graph — for example, by measuring its size and examining how its parts are connected.
 
 ```typescript
 const graph = new LineStringGraph(network);
@@ -57,9 +57,6 @@ const graphPoints = graph.getNodes();
 
 // Return all the unique edges as FeatureCollection<LineString>, where each unique edge is a Feature<LineString>
 const graphEdges = graph.getEdges(); 
-
-// The longest possible shortest path in the graph between two nodes (i.e. graph diameter)
-const longestShortestPath = graph.getMaxLengthShortestPath()
 ```
 
 ## Benchmarks
@@ -73,14 +70,16 @@ npm run benchmark
 Here is an example output of a benchmark run for routing:
 
 <pre>
-Terra Route         | ███████████ 270ms
-GeoJSON Path Finder | █████████████████████████ 591ms
-ngraph.graph        | ██████████████████████████████████████████████████ 1177ms
+Terra Route          | ██████ 186ms
+GeoJSON Path Finder  | ██████████████████ 566ms
+ngraph.graph         | ██████████████████████████████████████████████████ 1577ms
 </pre>
 
-Using default Haversine distance, Terra Route is approximately 2x faster than GeoJSON Path Finder with Haversine distance for A -> B path finding. If you pass in the CheapRuler distance metric (you can use the exposed `createCheapRuler` function), it is approximately x5 faster than GeoJSON Path Finder with Haversine distance. 
+Using default Haversine distance, Terra Route is approximately 3x faster than GeoJSON Path Finder with Haversine distance for A -> B path finding. If you pass in the CheapRuler distance metric (you can use the exposed `createCheapRuler` function), it is approximately x8 faster than GeoJSON Path Finder with Haversine distance. 
 
 For initialisation of the network, Terra Route is approximately 10x faster with Haversine than GeoJSON Path Finder. Terra Draw splits out instantiating the Class of the library from the actual graph building, which is done via `buildRouteGraph`. This allows you to defer graph creation to an appropriate time.
+
+Terra Route uses an [A* algorthm for pathfinding](https://en.wikipedia.org/wiki/A*_search_algorithm) and by default uses a [four-ary heap](https://en.wikipedia.org/wiki/D-ary_heap) for the underlying priority queue, although this is configurable. 
 
 ## Limitations
 
