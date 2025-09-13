@@ -163,8 +163,14 @@ class TerraRoute implements Router { // Main router class implementing A*
     }
 
     /**
-     * Computes the shortest route between two points using A*.
-     */
+      * Computes the shortest route between two points in the network using the A* algorithm.
+      * 
+      * @param start - A GeoJSON Point Feature representing the start location.
+      * @param end - A GeoJSON Point Feature representing the end location.
+      * @returns A GeoJSON LineString Feature representing the shortest path, or null if no path is found.
+      * 
+      * @throws Error if the network has not been built yet with buildRouteGraph(network).
+      */
     public getRoute(
         start: Feature<Point>, // Start point feature
         end: Feature<Point> // End point feature
@@ -331,4 +337,4 @@ class TerraRoute implements Router { // Main router class implementing A*
     }
 }
 
-export { TerraRoute, createCheapRuler, haversineDistance, LineStringGraph } // Export public API
+export { TerraRoute, createCheapRuler, haversineDistance, LineStringGraph }  

@@ -4,15 +4,16 @@ import { createRoutingBenchmark } from "./../create-benchmark";
 // Terra Route
 import { TerraRoute } from "../../src/terra-route";
 import { BenchmarkProps } from "../registered-benchmarks";
+import { MinHeap } from "../../src/heap/min-heap";
 
-export const CreateTerraRouteBenchmark = ({
+export const CreateTerraRouteMinHeapBenchmark = ({
     network,
     pairs,
     enabled
 }: BenchmarkProps) => createRoutingBenchmark(
-    'Terra Route (Default Four-ary Heap)',
+    'Terra Route with Min Heap',
     () => {
-        const terraRoute = new TerraRoute();
+        const terraRoute = new TerraRoute({ heap: MinHeap });
         terraRoute.buildRouteGraph(network);
         return terraRoute
     },
