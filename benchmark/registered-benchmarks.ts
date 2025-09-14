@@ -6,6 +6,7 @@ import { CreateTerraRouteFibonacciBenchmark } from "./benchmarks/terra-route-fib
 import { CreateTerraRoutePairingBenchmark } from "./benchmarks/terra-route-pairing.benchmark";
 import { CreateTerraRouteCheapRulerBenchmark } from "./benchmarks/terra-route-cheap-ruler.benchmark";
 import { CreateGeoJSONPathFinderBenchmark } from "./benchmarks/geojson-pathfinder.benchmark";
+import { CreateTerraRouteMinHeapBenchmark } from "./benchmarks/terra-route-min.benchmark";
 
 export type BenchmarkProps = {
     network: FeatureCollection<LineString>,
@@ -25,6 +26,7 @@ export const registeredBenchmarks = (network: FeatureCollection<LineString>, pai
         CreateTerraRouteCheapRulerBenchmark({ ...parameters, enabled: false }),
         CreateTerraRouteFibonacciBenchmark({ ...parameters, enabled: false }),
         CreateTerraRoutePairingBenchmark({ ...parameters, enabled: false }),
+        CreateTerraRouteMinHeapBenchmark({ ...parameters, enabled: false }),
         CreateTerraRouteCheapRulerBenchmark({ ...parameters, enabled: false }),
         CreateNgraphGraphBenchmark({ ...parameters, enabled: false }),
     ])
