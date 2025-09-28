@@ -45,19 +45,9 @@ const route = router.getRoute(startPoint, endPoint);
 console.log("Shortest route:", JSON.stringify(route, null, 2));
 ```
 
-## Additional Functionality
+## Terra Route Graph
 
-Terra Route provides a utility called LineStringGraph for analyzing GeoJSON route networks. This class is especially useful for debugging, as it includes methods to identify unique nodes, edges, and connected components, along with their counts. Beyond debugging, these methods help you programmatically explore and understand the structure of your graph — for example, by measuring its size and examining how its parts are connected.
-
-```typescript
-const graph = new LineStringGraph(network);
-
-// Return all nodes in the graph as FeatureCollection<Point>, where each unique node is a Feature<Point>
-const graphPoints = graph.getNodes();
-
-// Return all the unique edges as FeatureCollection<LineString>, where each unique edge is a Feature<LineString>
-const graphEdges = graph.getEdges(); 
-```
+Understanding and debugging routing graphs can be complicated. There is an additional helper library called [Terra Route Graph](https://www.github.com/JamesLMilner/terra-route-graph) (`terra-route-graph`) which can be used to help understand the graphs you are working with.
 
 ## Benchmarks
 
