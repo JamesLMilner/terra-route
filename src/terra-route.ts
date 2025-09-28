@@ -2,7 +2,6 @@ import { FeatureCollection, LineString, Point, Feature, Position } from "geojson
 import { haversineDistance } from "./distance/haversine"; // Great-circle distance function (default heuristic/edge weight)
 import { createCheapRuler } from "./distance/cheap-ruler"; // Factory for faster planar distance (exported for consumers)
 import { HeapConstructor } from "./heap/heap"; // Heap interface so users can plug custom heaps
-import { LineStringGraph } from "./graph/graph"; // Exported type (not used internally here)
 import { FourAryHeap } from "./heap/four-ary-heap";
 
 interface Router {
@@ -368,4 +367,4 @@ class TerraRoute implements Router {
     }
 }
 
-export { TerraRoute, createCheapRuler, haversineDistance, LineStringGraph }  
+export { TerraRoute, createCheapRuler, haversineDistance }  
