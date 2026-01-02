@@ -6,6 +6,7 @@ import { FourAryHeap } from "./heap/four-ary-heap";
 
 interface Router {
     buildRouteGraph(network: FeatureCollection<LineString>): void;
+    expandRouteGraph(network: FeatureCollection<LineString>): void;
     getRoute(start: Feature<Point>, end: Feature<Point>): Feature<LineString> | null;
 }
 
@@ -68,52 +69,15 @@ class TerraRoute implements Router {
         const coordsLocal = this.coordinates; // Local alias for coordinates array
         const measureDistance = this.distanceMeasurement; // Local alias for distance function
 
-        const features = network.features; // All LineString features
-
         // Pass 1: assign indices and count degrees per node
         const degree: number[] = []; // Dynamic degree array; grows as nodes are discovered
-        for (let f = 0, fLen = features.length; f < fLen; f++) { // Iterate features
-            const feature = features[f]; // Current feature
-            const lineCoords = feature.geometry.coordinates; // Coordinates for this LineString
+        this.forEachSegment(network, (a, b) => {
+            const indexA = this.indexCoordinate(a, coordIndexMapLocal, coordsLocal);
+            const indexB = this.indexCoordinate(b, coordIndexMapLocal, coordsLocal);
 
-            for (let i = 0, len = lineCoords.length - 1; i < len; i++) { // Iterate segment pairs
-                const a = lineCoords[i]; // Segment start coord
-                const b = lineCoords[i + 1]; // Segment end coord
-
-                const lngA = a[0], latA = a[1]; // Keys for A
-                const lngB = b[0], latB = b[1]; // Keys for B
-
-                // Index A
-                let latMapA = coordIndexMapLocal.get(lngA);
-                if (latMapA === undefined) {
-                    latMapA = new Map<number, number>();
-                    coordIndexMapLocal.set(lngA, latMapA);
-                }
-                let indexA = latMapA.get(latA);
-                if (indexA === undefined) {
-                    indexA = coordsLocal.length;
-                    coordsLocal.push(a);
-                    latMapA.set(latA, indexA);
-                }
-
-                // Index B
-                let latMapB = coordIndexMapLocal.get(lngB);
-                if (latMapB === undefined) {
-                    latMapB = new Map<number, number>();
-                    coordIndexMapLocal.set(lngB, latMapB);
-                }
-                let indexB = latMapB.get(latB);
-                if (indexB === undefined) {
-                    indexB = coordsLocal.length;
-                    coordsLocal.push(b);
-                    latMapB.set(latB, indexB);
-                }
-
-                // Count degree for both directions
-                degree[indexA] = (degree[indexA] ?? 0) + 1;
-                degree[indexB] = (degree[indexB] ?? 0) + 1;
-            }
-        }
+            degree[indexA] = (degree[indexA] ?? 0) + 1;
+            degree[indexB] = (degree[indexB] ?? 0) + 1;
+        });
 
         // Build CSR arrays from degree counts
         const nodeCount = this.coordinates.length; // Total nodes discovered
@@ -129,32 +93,20 @@ class TerraRoute implements Router {
 
         // Pass 2: fill CSR arrays using a write cursor per node
         const cursor = offsets.slice(); // Current write positions per node
-        for (let f = 0, fLen = features.length; f < fLen; f++) {
-            const feature = features[f];
-            const lineCoords = feature.geometry.coordinates;
-            for (let i = 0, len = lineCoords.length - 1; i < len; i++) {
-                const a = lineCoords[i];
-                const b = lineCoords[i + 1];
+        this.forEachSegment(network, (a, b) => {
+            // Read back indices (guaranteed to exist from pass 1)
+            const indexA = this.coordinateIndexMap.get(a[0])!.get(a[1])!;
+            const indexB = this.coordinateIndexMap.get(b[0])!.get(b[1])!;
 
-                const lngA = a[0], latA = a[1];
-                const lngB = b[0], latB = b[1];
+            const segmentDistance = measureDistance(a, b); // Edge weight once
 
-                // Read back indices (guaranteed to exist from pass 1)
-                const indexA = this.coordinateIndexMap.get(lngA)!.get(latA)!;
-                const indexB = this.coordinateIndexMap.get(lngB)!.get(latB)!;
-
-                const segmentDistance = measureDistance(a, b); // Edge weight once
-
-                // Write A → B
-                let pos = cursor[indexA]++;
-                indices[pos] = indexB;
-                distances[pos] = segmentDistance;
-                // Write B → A
-                pos = cursor[indexB]++;
-                indices[pos] = indexA;
-                distances[pos] = segmentDistance;
-            }
-        }
+            let pos = cursor[indexA]++;
+            indices[pos] = indexB;
+            distances[pos] = segmentDistance;
+            pos = cursor[indexB]++;
+            indices[pos] = indexA;
+            distances[pos] = segmentDistance;
+        });
 
         // Commit CSR to instance
         this.csrOffsets = offsets;
@@ -162,6 +114,122 @@ class TerraRoute implements Router {
         this.csrDistances = distances;
 
         // Prepare sparse shell only for dynamically added nodes later (no prefilled neighbor arrays)
+        this.adjacencyList = new Array(nodeCount);
+    }
+
+    /**
+     * Expands (merges) the existing graph with an additional LineString FeatureCollection.
+     */
+    public expandRouteGraph(network: FeatureCollection<LineString>): void {
+        if (this.network === null) {
+            throw new Error("Network not built. Please call buildRouteGraph(network) first.");
+        }
+
+        // Merge the feature arrays for reference/debugging. We avoid copying properties deeply.
+        this.network = {
+            type: "FeatureCollection",
+            features: [...this.network.features, ...network.features],
+        };
+
+        const coordIndexMapLocal = this.coordinateIndexMap;
+        const coordsLocal = this.coordinates;
+        const measureDistance = this.distanceMeasurement;
+        const adj = this.adjacencyList;
+
+        // Ensure we have adjacency arrays for any existing CSR-only nodes.
+        // (During buildRouteGraph, adjacencyList is sized but entries are undefined.)
+        for (let i = 0; i < adj.length; i++) {
+            if (adj[i] === undefined) adj[i] = [];
+        }
+
+        // Add new edges into the adjacency list (sparse), then rebuild CSR from adjacency.
+        this.forEachSegment(network, (a, b) => {
+            const indexA = this.indexCoordinate(a, coordIndexMapLocal, coordsLocal, (idx) => { adj[idx] = []; });
+            const indexB = this.indexCoordinate(b, coordIndexMapLocal, coordsLocal, (idx) => { adj[idx] = []; });
+
+            const segmentDistance = measureDistance(a, b);
+
+            adj[indexA].push({ node: indexB, distance: segmentDistance });
+            adj[indexB].push({ node: indexA, distance: segmentDistance });
+        });
+
+        this.rebuildCsrFromAdjacency();
+    }
+
+    /**
+     * Rebuild CSR arrays for the full node set, using:
+     * - Existing CSR edges (from the last build/expand)
+     * - Any additional edges stored in `adjacencyList`
+     */
+    private rebuildCsrFromAdjacency(): void {
+        const nodeCount = this.coordinates.length;
+        const adj = this.adjacencyList;
+
+        // Compute degree using CSR degree + adjacency degree
+        const degree = new Int32Array(nodeCount);
+
+        if (this.csrOffsets && this.csrIndices && this.csrDistances) {
+            const csrOffsets = this.csrOffsets;
+            const covered = Math.min(this.csrNodeCount, nodeCount);
+            for (let i = 0; i < covered; i++) {
+                degree[i] += (csrOffsets[i + 1] - csrOffsets[i]);
+            }
+        }
+
+        for (let i = 0; i < nodeCount; i++) {
+            const neighbors = adj[i];
+            if (neighbors && neighbors.length) degree[i] += neighbors.length;
+        }
+
+        const offsets = new Int32Array(nodeCount + 1);
+        for (let i = 0; i < nodeCount; i++) {
+            offsets[i + 1] = offsets[i] + degree[i];
+        }
+        const totalEdges = offsets[nodeCount];
+        const indices = new Int32Array(totalEdges);
+        const distances = new Float64Array(totalEdges);
+        const cursor = offsets.slice();
+
+        // Copy existing CSR edges first
+        if (this.csrOffsets && this.csrIndices && this.csrDistances) {
+            const csrOffsets = this.csrOffsets;
+            const csrIndices = this.csrIndices;
+            const csrDistances = this.csrDistances;
+            const covered = Math.min(this.csrNodeCount, nodeCount);
+            for (let n = 0; n < covered; n++) {
+                const startOff = csrOffsets[n];
+                const endOff = csrOffsets[n + 1];
+                let pos = cursor[n];
+                for (let i = startOff; i < endOff; i++) {
+                    indices[pos] = csrIndices[i];
+                    distances[pos] = csrDistances[i];
+                    pos++;
+                }
+                cursor[n] = pos;
+            }
+        }
+
+        // Append adjacency edges
+        for (let n = 0; n < nodeCount; n++) {
+            const neighbors = adj[n];
+            if (!neighbors || neighbors.length === 0) continue;
+            let pos = cursor[n];
+            for (let i = 0, len = neighbors.length; i < len; i++) {
+                const nb = neighbors[i];
+                indices[pos] = nb.node;
+                distances[pos] = nb.distance;
+                pos++;
+            }
+            cursor[n] = pos;
+        }
+
+        // Commit and reset adjacency (we've absorbed edges into CSR)
+        this.csrOffsets = offsets;
+        this.csrIndices = indices;
+        this.csrDistances = distances;
+        this.csrNodeCount = nodeCount;
+
+        // Keep adjacency list for *future* dynamic additions, but clear existing edges to avoid duplication.
         this.adjacencyList = new Array(nodeCount);
     }
 
@@ -468,6 +536,52 @@ class TerraRoute implements Router {
         this.hRevScratch = new Float64Array(capacity);
         this.scratchCapacity = capacity;
     }
+
+
+    // Iterate all consecutive segment pairs in a LineString FeatureCollection.
+    // Kept as a simple loop helper to avoid repeating nested iteration logic.
+    private forEachSegment(
+        network: FeatureCollection<LineString>,
+        fn: (a: Position, b: Position) => void,
+    ): void {
+        const features = network.features;
+        for (let f = 0, fLen = features.length; f < fLen; f++) {
+            const lineCoords = features[f].geometry.coordinates;
+            for (let i = 0, len = lineCoords.length - 1; i < len; i++) {
+                // GeoJSON coordinates are compatible with Position (number[]), and the project assumes [lng,lat]
+                fn(lineCoords[i] as Position, lineCoords[i + 1] as Position);
+            }
+        }
+    }
+
+    // Hot-path coordinate indexer used by both build/expand.
+    // Accepts explicit maps/arrays so callers can hoist them once.
+    private indexCoordinate(
+        coord: Position,
+        coordIndexMapLocal: Map<number, Map<number, number>>,
+        coordsLocal: Position[],
+        onNewIndex?: (index: number) => void,
+    ): number {
+        const lng = coord[0];
+        const lat = coord[1];
+
+        let latMap = coordIndexMapLocal.get(lng);
+        if (latMap === undefined) {
+            latMap = new Map<number, number>();
+            coordIndexMapLocal.set(lng, latMap);
+        }
+
+        let idx = latMap.get(lat);
+        if (idx === undefined) {
+            idx = coordsLocal.length;
+            coordsLocal.push(coord);
+            latMap.set(lat, idx);
+            if (onNewIndex) onNewIndex(idx);
+        }
+
+        return idx;
+    }
+
 }
 
 export { TerraRoute, createCheapRuler, haversineDistance }  

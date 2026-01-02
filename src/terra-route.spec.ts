@@ -52,6 +52,276 @@ describe("TerraRoute", () => {
         });
     })
 
+    describe('expandRouteGraph', () => {
+        it('throws an error if the network is not built', () => {
+            const network = createFeatureCollection([
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 0],
+                ]),
+            ]);
+
+            expect(() => routeFinder.expandRouteGraph(network)).toThrow("Network not built. Please call buildRouteGraph(network) first.");
+        })
+
+        it('merges a new network so routing works across both', () => {
+            // First network: 0,0 -> 1,0
+            const networkA = createFeatureCollection([
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 0],
+                ]),
+            ]);
+
+            // Second network connects to it and extends: 1,0 -> 2,0
+            const networkB = createFeatureCollection([
+                createLineStringFeature([
+                    [1, 0],
+                    [2, 0],
+                ]),
+            ]);
+
+            routeFinder.buildRouteGraph(networkA);
+
+            const start = createPointFeature([0, 0]);
+            const end = createPointFeature([2, 0]);
+
+            // Not routable yet
+            expect(routeFinder.getRoute(start, end)).toBeNull();
+
+            routeFinder.expandRouteGraph(networkB);
+            const result = routeFinder.getRoute(start, end);
+
+            expect(result).not.toBeNull();
+            expect(result!.geometry.coordinates).toEqual([
+                [0, 0],
+                [1, 0],
+                [2, 0],
+            ]);
+        })
+
+        it('preserves existing routes after expansion', () => {
+            const networkA = createFeatureCollection([
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 0],
+                    [2, 0],
+                ]),
+            ]);
+
+            const networkB = createFeatureCollection([
+                createLineStringFeature([
+                    [2, 0],
+                    [2, 1],
+                ]),
+            ]);
+
+            routeFinder.buildRouteGraph(networkA);
+
+            const start = createPointFeature([0, 0]);
+            const mid = createPointFeature([2, 0]);
+
+            const before = routeFinder.getRoute(start, mid);
+            expect(before).not.toBeNull();
+            expect(before!.geometry.coordinates).toEqual([
+                [0, 0],
+                [1, 0],
+                [2, 0],
+            ]);
+
+            routeFinder.expandRouteGraph(networkB);
+
+            const after = routeFinder.getRoute(start, mid);
+            expect(after).not.toBeNull();
+            expect(after!.geometry.coordinates).toEqual([
+                [0, 0],
+                [1, 0],
+                [2, 0],
+            ]);
+        })
+
+        it('is a no-op when expanding with an empty network', () => {
+            const networkA = createFeatureCollection([
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 0],
+                    [2, 0],
+                ]),
+            ]);
+
+            const emptyNetwork = createFeatureCollection([]);
+
+            routeFinder.buildRouteGraph(networkA);
+
+            const start = createPointFeature([0, 0]);
+            const end = createPointFeature([2, 0]);
+
+            const before = routeFinder.getRoute(start, end);
+            expect(before).not.toBeNull();
+            expect(before!.geometry.coordinates).toEqual([
+                [0, 0],
+                [1, 0],
+                [2, 0],
+            ]);
+
+            routeFinder.expandRouteGraph(emptyNetwork);
+
+            const after = routeFinder.getRoute(start, end);
+            expect(after).not.toBeNull();
+            expect(after!.geometry.coordinates).toEqual([
+                [0, 0],
+                [1, 0],
+                [2, 0],
+            ]);
+        })
+
+        it('does not create a route if the expanded network is still disconnected', () => {
+            const networkA = createFeatureCollection([
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 0],
+                ]),
+            ]);
+
+            // Disconnected component
+            const networkB = createFeatureCollection([
+                createLineStringFeature([
+                    [10, 0],
+                    [11, 0],
+                ]),
+            ]);
+
+            routeFinder.buildRouteGraph(networkA);
+
+            const start = createPointFeature([0, 0]);
+            const end = createPointFeature([11, 0]);
+
+            // Still not routable after expansion (no connecting edge)
+            routeFinder.expandRouteGraph(networkB);
+            expect(routeFinder.getRoute(start, end)).toBeNull();
+        })
+
+        it('allows routing that traverses only newly-added nodes after expansion', () => {
+            const networkA = createFeatureCollection([
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 0],
+                ]),
+            ]);
+
+            // Adds a detour: 1,0 -> 1,1 -> 2,1 -> 2,0
+            const networkB = createFeatureCollection([
+                createLineStringFeature([
+                    [1, 0],
+                    [1, 1],
+                ]),
+                createLineStringFeature([
+                    [1, 1],
+                    [2, 1],
+                ]),
+                createLineStringFeature([
+                    [2, 1],
+                    [2, 0],
+                ]),
+            ]);
+
+            routeFinder.buildRouteGraph(networkA);
+            routeFinder.expandRouteGraph(networkB);
+
+            const start = createPointFeature([0, 0]);
+            const end = createPointFeature([2, 0]);
+
+            const result = routeFinder.getRoute(start, end);
+            expect(result).not.toBeNull();
+            expect(result!.geometry.coordinates).toEqual([
+                [0, 0],
+                [1, 0],
+                [1, 1],
+                [2, 1],
+                [2, 0],
+            ]);
+        })
+
+        it('supports multiple sequential expansions', () => {
+            const networkA = createFeatureCollection([
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 0],
+                ]),
+            ]);
+            const networkB = createFeatureCollection([
+                createLineStringFeature([
+                    [1, 0],
+                    [2, 0],
+                ]),
+            ]);
+            const networkC = createFeatureCollection([
+                createLineStringFeature([
+                    [2, 0],
+                    [3, 0],
+                ]),
+            ]);
+
+            routeFinder.buildRouteGraph(networkA);
+            routeFinder.expandRouteGraph(networkB);
+            routeFinder.expandRouteGraph(networkC);
+
+            const start = createPointFeature([0, 0]);
+            const end = createPointFeature([3, 0]);
+
+            const result = routeFinder.getRoute(start, end);
+            expect(result).not.toBeNull();
+            expect(result!.geometry.coordinates).toEqual([
+                [0, 0],
+                [1, 0],
+                [2, 0],
+                [3, 0],
+            ]);
+        })
+
+        it('continues to behave correctly if the same network is expanded in again', () => {
+            const networkA = createFeatureCollection([
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 0],
+                ]),
+            ]);
+
+            // networkB connects and extends
+            const networkB = createFeatureCollection([
+                createLineStringFeature([
+                    [1, 0],
+                    [2, 0],
+                ]),
+            ]);
+
+            routeFinder.buildRouteGraph(networkA);
+            routeFinder.expandRouteGraph(networkB);
+
+            const start = createPointFeature([0, 0]);
+            const end = createPointFeature([2, 0]);
+
+            const first = routeFinder.getRoute(start, end);
+            expect(first).not.toBeNull();
+            expect(first!.geometry.coordinates).toEqual([
+                [0, 0],
+                [1, 0],
+                [2, 0],
+            ]);
+
+            // Expand with the exact same network again.
+            routeFinder.expandRouteGraph(networkB);
+
+            const second = routeFinder.getRoute(start, end);
+            expect(second).not.toBeNull();
+            expect(second!.geometry.coordinates).toEqual([
+                [0, 0],
+                [1, 0],
+                [2, 0],
+            ]);
+        })
+    })
+
     describe('getRoute', () => {
         it('throws an error if the network is not built', () => {
             const start = createPointFeature([0, 0]);
