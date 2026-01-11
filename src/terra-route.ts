@@ -31,6 +31,11 @@ class TerraRoute implements Router {
     private cameFromScratch: Int32Array | null = null; // Predecessor per node for path reconstruction
     private visitedScratch: Uint8Array | null = null; // Visited set to avoid reprocessing
     private hScratch: Float64Array | null = null; // Per-node heuristic cache for the current query (lazy compute)
+    // Reverse-direction scratch for bidirectional search
+    private gScoreRevScratch: Float64Array | null = null; // gScore per node from the end
+    private cameFromRevScratch: Int32Array | null = null; // Successor per node (next step toward the end)
+    private visitedRevScratch: Uint8Array | null = null; // Visited set for reverse search
+    private hRevScratch: Float64Array | null = null; // Heuristic cache for reverse direction per query
     private scratchCapacity = 0; // Current capacity of scratch arrays
 
     constructor(options?: {
@@ -196,104 +201,251 @@ class TerraRoute implements Router {
         this.ensureScratch(nodeCount); // Allocate scratch arrays if needed
 
         // Non-null after ensure
-        const gScore = this.gScoreScratch!; // gScore pointer
-        const cameFrom = this.cameFromScratch!; // cameFrom pointer
-        const visited = this.visitedScratch!; // visited pointer
-        const hCache = this.hScratch!; // heuristic cache pointer
+        const gF = this.gScoreScratch!; // forward gScore (from start)
+        const gR = this.gScoreRevScratch!; // reverse gScore (from end)
+        const prevF = this.cameFromScratch!; // predecessor in forward search
+        const nextR = this.cameFromRevScratch!; // successor in reverse search (toward end)
+        const visF = this.visitedScratch!;
+        const visR = this.visitedRevScratch!;
+        const hF = this.hScratch!;
+        const hR = this.hRevScratch!;
 
-        // Reset only the used range for speed
-        gScore.fill(Number.POSITIVE_INFINITY, 0, nodeCount); // Init gScore to +∞
-        cameFrom.fill(-1, 0, nodeCount); // Init predecessors to -1 (unknown)
-        visited.fill(0, 0, nodeCount); // Init visited flags to 0
-        hCache.fill(-1, 0, nodeCount); // Init heuristic cache with sentinel (-1 means unknown)
+        gF.fill(Number.POSITIVE_INFINITY, 0, nodeCount);
+        gR.fill(Number.POSITIVE_INFINITY, 0, nodeCount);
+        prevF.fill(-1, 0, nodeCount);
+        nextR.fill(-1, 0, nodeCount);
+        visF.fill(0, 0, nodeCount);
+        visR.fill(0, 0, nodeCount);
+        hF.fill(-1, 0, nodeCount);
+        hR.fill(-1, 0, nodeCount);
 
-        // Create min-heap (priority queue)
-        const openSet = new this.heapConstructor();
+        const openF = new this.heapConstructor();
+        const openR = new this.heapConstructor();
 
-        // Precompute heuristic for start to prime the queue cost
-        const endCoord = coords[endIndex]; // Cache end coordinate for heuristic
-        let hStart = hCache[startIndex];
+        const startCoord = coords[startIndex];
+        const endCoord = coords[endIndex];
 
-        if (hStart < 0) {
-            hStart = measureDistance(coords[startIndex], endCoord);
-            hCache[startIndex] = hStart;
-        }
+        gF[startIndex] = 0;
+        gR[endIndex] = 0;
 
-        openSet.insert(hStart, startIndex); // Insert start with f = g(0) + h(start)
-        gScore[startIndex] = 0; // g(start) = 0
+        // Bidirectional Dijkstra (A* with zero heuristic). This keeps correctness simple and matches the
+        // reference pathfinder while still saving work by meeting in the middle.
+        openF.insert(0, startIndex);
+        openR.insert(0, endIndex);
 
-        while (openSet.size() > 0) { // Main A* loop until queue empty
-            const current = openSet.extractMin()!; // Pop node with smallest f
-            if (visited[current] !== 0) { // Skip if already finalized
-                continue;
+        // Best meeting point found so far
+        let bestPathCost = Number.POSITIVE_INFINITY;
+        let meetingNode = -1;
+
+        // Helper: relax edges out of `current` in the given direction.
+        const relaxNeighbors = (
+            current: number,
+            gThis: Float64Array,
+            gOther: Float64Array,
+            visThis: Uint8Array,
+            prevOrNext: Int32Array,
+            forward: boolean
+        ): void => {
+            // Prefer CSR neighbors if available for this node, fall back to sparse list for dynamically added nodes
+            if (this.csrOffsets && current < this.csrNodeCount) {
+                const csrOffsets = this.csrOffsets!;
+                const csrIndices = this.csrIndices!;
+                const csrDistances = this.csrDistances!;
+                for (let i = csrOffsets[current], endOff = csrOffsets[current + 1]; i < endOff; i++) {
+                    const nbNode = csrIndices[i];
+                    const tentativeG = gThis[current] + csrDistances[i];
+                    if (tentativeG < gThis[nbNode]) {
+                        gThis[nbNode] = tentativeG;
+                        // Forward stores predecessor; reverse stores successor
+                        prevOrNext[nbNode] = current;
+                        // If the other search has reached nbNode, update best known meeting
+                        const otherG = gOther[nbNode];
+                        if (otherG !== Number.POSITIVE_INFINITY) {
+                            const total = tentativeG + otherG;
+                            if (total < bestPathCost) {
+                                bestPathCost = total;
+                                meetingNode = nbNode;
+                            }
+                        }
+                        // Push into appropriate open set below (caller)
+                    }
+                }
+            } else {
+                const neighbors = adj[current];
+                if (!neighbors || neighbors.length === 0) return;
+                for (let i = 0, n = neighbors.length; i < n; i++) {
+                    const nb = neighbors[i];
+                    const nbNode = nb.node;
+                    const tentativeG = gThis[current] + nb.distance;
+                    if (tentativeG < gThis[nbNode]) {
+                        gThis[nbNode] = tentativeG;
+                        prevOrNext[nbNode] = current;
+                        const otherG = gOther[nbNode];
+                        if (otherG !== Number.POSITIVE_INFINITY) {
+                            const total = tentativeG + otherG;
+                            if (total < bestPathCost) {
+                                bestPathCost = total;
+                                meetingNode = nbNode;
+                            }
+                        }
+                    }
+                }
             }
-            if (current === endIndex) { // Early exit if reached goal
+        };
+
+        // Main bidirectional loop: expand alternately.
+        // Without a heap peek, a safe and effective stopping rule is based on the last extracted keys:
+        // once min_g_forward + min_g_reverse >= bestPathCost, no shorter path can still be found.
+        let lastExtractedGForward = 0;
+        let lastExtractedGReverse = 0;
+        while (openF.size() > 0 && openR.size() > 0) {
+            if (meetingNode >= 0 && (lastExtractedGForward + lastExtractedGReverse) >= bestPathCost) {
                 break;
             }
-            visited[current] = 1; // Mark as visited
 
-            // Prefer CSR neighbors if available for this node, fall back to sparse list for dynamically added nodes
+            // Expand one step from each side, prioritizing the smaller frontier.
+            const expandForward = openF.size() <= openR.size();
 
-            if (this.csrOffsets && current < this.csrNodeCount) { // Use CSR fast path
-                const csrOffsets = this.csrOffsets!; // Local CSR offsets (non-null here)
-                const csrIndices = this.csrIndices!; // Local CSR neighbors
-                const csrDistances = this.csrDistances!; // Local CSR weights
-                const startOff = csrOffsets[current]; // Row start for current
-                const endOff = csrOffsets[current + 1]; // Row end for current
+            if (expandForward) {
+                const current = openF.extractMin()!;
+                if (visF[current] !== 0) continue;
+                lastExtractedGForward = gF[current];
+                visF[current] = 1;
 
-                for (let i = startOff; i < endOff; i++) { // Iterate neighbors in CSR slice
-                    const nbNode = csrIndices[i]; // Neighbor node id
-                    const tentativeG = gScore[current] + csrDistances[i]; // g' = g(current) + w(current, nb)
-                    if (tentativeG < gScore[nbNode]) { // Relaxation check
-                        gScore[nbNode] = tentativeG; // Update best g
-                        cameFrom[nbNode] = current; // Track predecessor
-                        // A* priority = g + h (cache h per node for this query)
-                        let hVal = hCache[nbNode];
-                        if (hVal < 0) { hVal = measureDistance(coords[nbNode], endCoord); hCache[nbNode] = hVal; }
-                        openSet.insert(tentativeG + hVal, nbNode); // Push/update neighbor into open set
+                // If reverse has finalized this node, we have a candidate meeting.
+                if (visR[current] !== 0) {
+                    const total = gF[current] + gR[current];
+                    if (total < bestPathCost) {
+                        bestPathCost = total;
+                        meetingNode = current;
                     }
                 }
-            }
-            // Fallback: use sparse adjacency (only for nodes added after CSR build)
-            else {
 
-                const neighbors = adj[current]; // Neighbor list for current
-                if (!neighbors || neighbors.length === 0) continue; // No neighbors
-                for (let i = 0, n = neighbors.length; i < n; i++) { // Iterate neighbors
-                    const nb = neighbors[i]; // Neighbor entry
-                    const nbNode = nb.node; // Neighbor id
+                // Relax neighbors and push newly improved ones
+                if (this.csrOffsets && current < this.csrNodeCount) {
+                    const csrOffsets = this.csrOffsets!;
+                    const csrIndices = this.csrIndices!;
+                    const csrDistances = this.csrDistances!;
+                    for (let i = csrOffsets[current], endOff = csrOffsets[current + 1]; i < endOff; i++) {
+                        const nbNode = csrIndices[i];
+                        const tentativeG = gF[current] + csrDistances[i];
+                        if (tentativeG < gF[nbNode]) {
+                            gF[nbNode] = tentativeG;
+                            prevF[nbNode] = current;
+                            const otherG = gR[nbNode];
+                            if (otherG !== Number.POSITIVE_INFINITY) {
+                                const total = tentativeG + otherG;
+                                if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
+                            }
+                            openF.insert(tentativeG, nbNode);
+                        }
+                    }
+                } else {
+                    const neighbors = adj[current];
+                    if (neighbors && neighbors.length) {
+                        for (let i = 0, n = neighbors.length; i < n; i++) {
+                            const nb = neighbors[i];
+                            const nbNode = nb.node;
+                            const tentativeG = gF[current] + nb.distance;
+                            if (tentativeG < gF[nbNode]) {
+                                gF[nbNode] = tentativeG;
+                                prevF[nbNode] = current;
+                                const otherG = gR[nbNode];
+                                if (otherG !== Number.POSITIVE_INFINITY) {
+                                    const total = tentativeG + otherG;
+                                    if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
+                                }
+                                openF.insert(tentativeG, nbNode);
+                            }
+                        }
+                    }
+                }
+            } else {
+                const current = openR.extractMin()!;
+                if (visR[current] !== 0) continue;
+                lastExtractedGReverse = gR[current];
+                visR[current] = 1;
 
-                    const tentativeG = gScore[current] + nb.distance; // g' via current
-                    if (tentativeG < gScore[nbNode]) { // Relax if better
-                        gScore[nbNode] = tentativeG; // Update best g
-                        cameFrom[nbNode] = current; // Track predecessor
+                if (visF[current] !== 0) {
+                    const total = gF[current] + gR[current];
+                    if (total < bestPathCost) {
+                        bestPathCost = total;
+                        meetingNode = current;
+                    }
+                }
 
-                        // A* priority = g + h (cached)
-                        let hVal = hCache[nbNode];
-                        if (hVal < 0) { hVal = measureDistance(coords[nbNode], endCoord); hCache[nbNode] = hVal; }
-                        openSet.insert(tentativeG + hVal, nbNode); // Enqueue neighbor
+                // Reverse direction: same neighbor iteration because graph is undirected.
+                // Store successor pointer (next step toward end) i.e. nextR[neighbor] = current.
+                if (this.csrOffsets && current < this.csrNodeCount) {
+                    const csrOffsets = this.csrOffsets!;
+                    const csrIndices = this.csrIndices!;
+                    const csrDistances = this.csrDistances!;
+                    for (let i = csrOffsets[current], endOff = csrOffsets[current + 1]; i < endOff; i++) {
+                        const nbNode = csrIndices[i];
+                        const tentativeG = gR[current] + csrDistances[i];
+                        if (tentativeG < gR[nbNode]) {
+                            gR[nbNode] = tentativeG;
+                            nextR[nbNode] = current;
+                            const otherG = gF[nbNode];
+                            if (otherG !== Number.POSITIVE_INFINITY) {
+                                const total = tentativeG + otherG;
+                                if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
+                            }
+                            openR.insert(tentativeG, nbNode);
+                        }
+                    }
+                } else {
+                    const neighbors = adj[current];
+                    if (neighbors && neighbors.length) {
+                        for (let i = 0, n = neighbors.length; i < n; i++) {
+                            const nb = neighbors[i];
+                            const nbNode = nb.node;
+                            const tentativeG = gR[current] + nb.distance;
+                            if (tentativeG < gR[nbNode]) {
+                                gR[nbNode] = tentativeG;
+                                nextR[nbNode] = current;
+                                const otherG = gF[nbNode];
+                                if (otherG !== Number.POSITIVE_INFINITY) {
+                                    const total = tentativeG + otherG;
+                                    if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
+                                }
+                                openR.insert(tentativeG, nbNode);
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // If goal was never reached/relaxed, return null
-        if (cameFrom[endIndex] < 0) {
+        if (meetingNode < 0) {
             return null;
         }
 
-        // Reconstruct path (push + reverse to avoid O(n^2) unshift)
+        // Reconstruct path: start -> meeting using prevF, then meeting -> end using nextR
         const path: Position[] = [];
-        let cur = endIndex;
-        while (cur !== startIndex) {
-            path.push(coords[cur]);
-            cur = cameFrom[cur];
-        }
-        // Include start coordinate
-        path.push(coords[startIndex]);
 
-        // Reverse to get start→end order
+        // Walk back from meeting to start, collecting nodes
+        let cur = meetingNode;
+        while (cur !== startIndex && cur >= 0) {
+            path.push(coords[cur]);
+            cur = prevF[cur];
+        }
+        if (cur !== startIndex) {
+            // Forward tree doesn't connect start to meeting (shouldn't happen if meeting is valid)
+            return null;
+        }
+        path.push(coords[startIndex]);
         path.reverse();
+
+        // Walk from meeting to end (skip meeting node because it's already included)
+        cur = meetingNode;
+        while (cur !== endIndex) {
+            cur = nextR[cur];
+            if (cur < 0) {
+                return null;
+            }
+            path.push(coords[cur]);
+        }
 
         return {
             type: "Feature",
@@ -353,7 +505,11 @@ class TerraRoute implements Router {
             && this.gScoreScratch
             && this.cameFromScratch
             && this.visitedScratch
-            && this.hScratch;
+            && this.hScratch
+            && this.gScoreRevScratch
+            && this.cameFromRevScratch
+            && this.visitedRevScratch
+            && this.hRevScratch;
 
         if (ifAlreadyBigEnough) {
             return; // Nothing to do
@@ -363,6 +519,10 @@ class TerraRoute implements Router {
         this.cameFromScratch = new Int32Array(capacity);
         this.visitedScratch = new Uint8Array(capacity);
         this.hScratch = new Float64Array(capacity);
+        this.gScoreRevScratch = new Float64Array(capacity);
+        this.cameFromRevScratch = new Int32Array(capacity);
+        this.visitedRevScratch = new Uint8Array(capacity);
+        this.hRevScratch = new Float64Array(capacity);
         this.scratchCapacity = capacity;
     }
 }

@@ -6,6 +6,18 @@ describe("FibonacciHeap", () => {
         expect(heap.size()).toBe(0);
     });
 
+    it("peekMinKey returns null for empty and reflects current min", () => {
+        const heap = new FibonacciHeap();
+        expect(heap.peekMinKey()).toBeNull();
+
+        heap.insert(10, 10);
+        expect(heap.peekMinKey()).toBe(10);
+        heap.insert(5, 5);
+        expect(heap.peekMinKey()).toBe(5);
+        heap.extractMin();
+        expect(heap.peekMinKey()).toBe(10);
+    });
+
     it("should insert a single element and extract it as the minimum", () => {
         const heap = new FibonacciHeap();
         heap.insert(42, 42);

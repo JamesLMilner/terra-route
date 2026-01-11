@@ -22,6 +22,16 @@ describe("MinHeap", () => {
         expect(minHeap.size()).toBe(0);
     });
 
+    it("peekMinKey returns null for empty and reflects current min", () => {
+        expect(minHeap.peekMinKey()).toBeNull();
+        minHeap.insert(10, 1);
+        expect(minHeap.peekMinKey()).toBe(10);
+        minHeap.insert(5, 2);
+        expect(minHeap.peekMinKey()).toBe(5);
+        minHeap.extractMin();
+        expect(minHeap.peekMinKey()).toBe(10);
+    });
+
     it("maintains proper order for ascending key inserts", () => {
         const keys = [1, 2, 3, 4, 5];
         keys.forEach((key) => {
