@@ -109,10 +109,6 @@ export class FibonacciHeap implements Heap {
         return oldMin.value;
     }
 
-    public peekMinKey(): number | null {
-        return this.minNode ? this.minNode.key : null;
-    }
-
     /** Returns the number of elements stored in the heap. */
     public size(): number {
         return this.totalNodes;

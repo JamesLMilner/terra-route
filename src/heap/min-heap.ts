@@ -46,11 +46,6 @@ export class MinHeap implements Heap {
         return minNode.value;
     }
 
-    peekMinKey(): number | null {
-        const first = this.heap[0];
-        return first ? first.key : null;
-    }
-
     size(): number {
         return this.heap.length;
     }

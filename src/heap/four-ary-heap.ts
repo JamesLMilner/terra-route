@@ -66,10 +66,6 @@ export class FourAryHeap implements Heap {
         return minValue;
     }
 
-    peekMinKey(): number | null {
-        return this.length === 0 ? null : this.keys[0];
-    }
-
     size(): number {
         return this.length;
     }

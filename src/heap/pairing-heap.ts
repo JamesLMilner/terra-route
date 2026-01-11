@@ -40,10 +40,6 @@ export class PairingHeap implements Heap {
         return minValue;
     }
 
-    public peekMinKey(): number | null {
-        return this.root ? this.root.key : null;
-    }
-
     public size(): number {
         return this.heapSize;
     }

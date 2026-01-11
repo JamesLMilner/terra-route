@@ -4,18 +4,7 @@ describe("PairingHeap", () => {
     it("starts empty", () => {
         const heap = new PairingHeap();
         expect(heap.size()).toBe(0);
-        expect(heap.peekMinKey()).toBeNull();
         expect(heap.extractMin()).toBeNull();
-    });
-
-    it("peekMinKey returns current min without removing it", () => {
-        const heap = new PairingHeap();
-        heap.insert(10, 10);
-        expect(heap.peekMinKey()).toBe(10);
-        heap.insert(5, 5);
-        expect(heap.peekMinKey()).toBe(5);
-        expect(heap.extractMin()).toBe(5);
-        expect(heap.peekMinKey()).toBe(10);
     });
 
     it("inserts elements and extracts them in ascending key order", () => {
