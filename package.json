@@ -7,6 +7,7 @@
         "docs:serve": "serve ./docs",
         "test": "jest --silent=false",
         "benchmark": "tsx benchmark/benchmark.ts",
+        "benchmark:loop": "for i in {1..8}; do npm run -s benchmark | awk '/GRAPH ROUTING PERFORMANCE/{p=1} p && /Terra Route took/{print $0; p=0}'; done",
         "build": "microbundle",
         "watch": "microbundle --watch --format modern",
         "unused": "knip",
