@@ -69,7 +69,7 @@ Using default Haversine distance, Terra Route is approximately 3.75x faster than
 
 For initialisation of the network, Terra Route is approximately 10x faster with Haversine than GeoJSON Path Finder. Terra Draw splits out instantiating the Class of the library from the actual graph building, which is done via `buildRouteGraph`. This allows you to defer graph creation to an appropriate time.
 
-Terra Route uses an [A* algorthm for pathfinding](https://en.wikipedia.org/wiki/A*_search_algorithm) and by default uses a [four-ary heap](https://en.wikipedia.org/wiki/D-ary_heap) for the underlying priority queue, although this is configurable. 
+Terra Route uses an [bi-directional A* algorithm for pathfinding](https://en.wikipedia.org/wiki/A*_search_algorithm) and by default uses a [four-ary heap](https://en.wikipedia.org/wiki/D-ary_heap) for the underlying priority queue, although this is configurable. 
 
 ## Limitations
 
