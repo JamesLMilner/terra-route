@@ -237,62 +237,6 @@ class TerraRoute implements Router {
         let bestPathCost = Number.POSITIVE_INFINITY;
         let meetingNode = -1;
 
-        // Helper: relax edges out of `current` in the given direction.
-        const relaxNeighbors = (
-            current: number,
-            gThis: Float64Array,
-            gOther: Float64Array,
-            visThis: Uint8Array,
-            prevOrNext: Int32Array,
-            forward: boolean
-        ): void => {
-            // Prefer CSR neighbors if available for this node, fall back to sparse list for dynamically added nodes
-            if (this.csrOffsets && current < this.csrNodeCount) {
-                const csrOffsets = this.csrOffsets!;
-                const csrIndices = this.csrIndices!;
-                const csrDistances = this.csrDistances!;
-                for (let i = csrOffsets[current], endOff = csrOffsets[current + 1]; i < endOff; i++) {
-                    const nbNode = csrIndices[i];
-                    const tentativeG = gThis[current] + csrDistances[i];
-                    if (tentativeG < gThis[nbNode]) {
-                        gThis[nbNode] = tentativeG;
-                        // Forward stores predecessor; reverse stores successor
-                        prevOrNext[nbNode] = current;
-                        // If the other search has reached nbNode, update best known meeting
-                        const otherG = gOther[nbNode];
-                        if (otherG !== Number.POSITIVE_INFINITY) {
-                            const total = tentativeG + otherG;
-                            if (total < bestPathCost) {
-                                bestPathCost = total;
-                                meetingNode = nbNode;
-                            }
-                        }
-                        // Push into appropriate open set below (caller)
-                    }
-                }
-            } else {
-                const neighbors = adj[current];
-                if (!neighbors || neighbors.length === 0) return;
-                for (let i = 0, n = neighbors.length; i < n; i++) {
-                    const nb = neighbors[i];
-                    const nbNode = nb.node;
-                    const tentativeG = gThis[current] + nb.distance;
-                    if (tentativeG < gThis[nbNode]) {
-                        gThis[nbNode] = tentativeG;
-                        prevOrNext[nbNode] = current;
-                        const otherG = gOther[nbNode];
-                        if (otherG !== Number.POSITIVE_INFINITY) {
-                            const total = tentativeG + otherG;
-                            if (total < bestPathCost) {
-                                bestPathCost = total;
-                                meetingNode = nbNode;
-                            }
-                        }
-                    }
-                }
-            }
-        };
-
         // Main bidirectional loop: expand alternately.
         // Without a heap peek, a safe and effective stopping rule is based on the last extracted keys:
         // once min_g_forward + min_g_reverse >= bestPathCost, no shorter path can still be found.

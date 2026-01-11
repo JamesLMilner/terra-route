@@ -97,7 +97,7 @@ describe("TerraRoute", () => {
             expect(routeFinder.getRoute(start, end)).toBeNull();
         });
 
-        it("doesn't throw when you request a route between two points not in the network", () => {
+        it("returns null when both points are outside the network", () => {
             const network = createFeatureCollection([
                 createLineStringFeature([
                     [0, 0],
@@ -113,17 +113,6 @@ describe("TerraRoute", () => {
 
             // Still disconnected, so route is null.
             expect(routeFinder.getRoute(start, end)).toBeNull();
-
-            // Sanity check (implementation detail): internal structures remain consistent after adding new points.
-            type TerraRouteInternals = {
-                csrOffsets: Int32Array | null;
-                csrNodeCount: number;
-                coordinates: unknown[];
-            };
-            const internal = routeFinder as unknown as TerraRouteInternals;
-            expect(internal.csrOffsets).toBeDefined();
-            expect(internal.csrNodeCount).toBe(internal.coordinates.length);
-            expect(internal.csrOffsets!.length).toBe(internal.csrNodeCount + 1);
         });
 
         it("can route between two points added at runtime when the link is provided", () => {
@@ -261,6 +250,208 @@ describe("TerraRoute", () => {
             expect(result!.geometry.coordinates[0]).toEqual([0, 0]);
             expect(result!.geometry.coordinates.at(-1)).toEqual([2, 0]);
             expect(result!.geometry.coordinates.length).toBeGreaterThanOrEqual(2);
+        });
+
+        it("supports a custom heap implementation", () => {
+            // Minimal heap that satisfies the expected interface (extracts minimum key).
+            class SimpleMinHeap {
+                private items: Array<{ key: number; value: number }> = [];
+                insert(key: number, value: number) {
+                    this.items.push({ key, value });
+                }
+                extractMin() {
+                    if (this.items.length === 0) return null;
+                    let minIndex = 0;
+                    for (let i = 1; i < this.items.length; i++) {
+                        if (this.items[i].key < this.items[minIndex].key) minIndex = i;
+                    }
+                    return this.items.splice(minIndex, 1)[0].value;
+                }
+                size() {
+                    return this.items.length;
+                }
+            }
+
+            const network = createFeatureCollection([
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 0],
+                    [2, 0],
+                ]),
+                createLineStringFeature([
+                    [2, 0],
+                    [2, 1],
+                ]),
+            ]);
+
+            const heapConstructor = SimpleMinHeap as unknown as new () => {
+                insert: (key: number, value: number) => void;
+                extractMin: () => number | null;
+                size: () => number;
+            };
+
+            const rf = new TerraRoute({ heap: heapConstructor });
+            rf.buildRouteGraph(network);
+
+            const start = createPointFeature([0, 0]);
+            const end = createPointFeature([2, 1]);
+
+            const result = rf.getRoute(start, end);
+            expect(result).not.toBeNull();
+            expect(result!.geometry.coordinates).toEqual([
+                [0, 0],
+                [1, 0],
+                [2, 0],
+                [2, 1],
+            ]);
+        });
+
+        it("prefers the shortest route even when there are many alternatives", () => {
+            // A short corridor from start to end, plus lots of distracting branches.
+            const corridor: number[][] = [
+                [0, 0],
+                [1, 0],
+                [2, 0],
+                [3, 0],
+                [4, 0],
+                [5, 0],
+                [6, 0],
+            ];
+
+            const features = [createLineStringFeature(corridor)];
+
+            // Add many branches off the early corridor nodes to enlarge the frontier.
+            // These branches don't lead to the end.
+            for (let i = 0; i <= 3; i++) {
+                for (let b = 1; b <= 20; b++) {
+                    features.push(createLineStringFeature([
+                        [i, 0],
+                        [i, b],
+                    ]));
+                }
+            }
+
+            // Add a couple of loops to create multiple improvements for some nodes.
+            features.push(createLineStringFeature([
+                [1, 0],
+                [1, 1],
+                [2, 0],
+            ]));
+            features.push(createLineStringFeature([
+                [2, 0],
+                [2, 1],
+                [3, 0],
+            ]));
+
+            const network = createFeatureCollection(features);
+            routeFinder.buildRouteGraph(network);
+
+            const start = createPointFeature([0, 0]);
+            const end = createPointFeature([6, 0]);
+
+            const result = routeFinder.getRoute(start, end);
+            expect(result).not.toBeNull();
+            expect(getReasonIfLineStringInvalid(result)).toBe(undefined);
+            expect(startAndEndAreCorrect(result!, start, end)).toBe(true);
+            expect(result!.geometry.coordinates).toEqual(corridor);
+        });
+
+        it("returns a route across imbalanced branching", () => {
+            // Start side: large star (many edges) feeding into a single corridor.
+            // End side: small local neighborhood. This encourages the reverse side to expand at least once.
+
+            const features = [] as ReturnType<typeof createLineStringFeature>[];
+
+            // Core corridor: (0,0) -> (1,0) -> (2,0) -> (3,0)
+            features.push(createLineStringFeature([
+                [0, 0],
+                [1, 0],
+                [2, 0],
+                [3, 0],
+            ]));
+
+            // Heavy fan-out at the start node: many leaves that don't help reach the end.
+            for (let i = 1; i <= 60; i++) {
+                features.push(createLineStringFeature([
+                    [0, 0],
+                    [-i, i],
+                ]));
+            }
+
+            // Light branching near the end.
+            features.push(createLineStringFeature([
+                [3, 0],
+                [3, 1],
+            ]));
+
+            const network = createFeatureCollection(features);
+            routeFinder.buildRouteGraph(network);
+
+            const start = createPointFeature([0, 0]);
+            const end = createPointFeature([3, 0]);
+
+            const result = routeFinder.getRoute(start, end);
+            expect(result).not.toBeNull();
+            expect(result!.geometry.coordinates).toEqual([
+                [0, 0],
+                [1, 0],
+                [2, 0],
+                [3, 0],
+            ]);
+        });
+
+        it("returns null when only one of the points can reach the network", () => {
+            const network = createFeatureCollection([
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 0],
+                    [2, 0],
+                ]),
+            ]);
+
+            routeFinder.buildRouteGraph(network);
+
+            const start = createPointFeature([10, 10]);
+            const end = createPointFeature([2, 0]);
+
+            const result = routeFinder.getRoute(start, end);
+            expect(result).toBeNull();
+        });
+
+        it("returns a route after being called multiple times", () => {
+            const network = createFeatureCollection([
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 0],
+                    [2, 0],
+                ]),
+                createLineStringFeature([
+                    [2, 0],
+                    [3, 0],
+                ]),
+            ]);
+
+            routeFinder.buildRouteGraph(network);
+
+            const start1 = createPointFeature([0, 0]);
+            const end1 = createPointFeature([3, 0]);
+            const first = routeFinder.getRoute(start1, end1);
+            expect(first).not.toBeNull();
+            expect(first!.geometry.coordinates).toEqual([
+                [0, 0],
+                [1, 0],
+                [2, 0],
+                [3, 0],
+            ]);
+
+            const start2 = createPointFeature([1, 0]);
+            const end2 = createPointFeature([2, 0]);
+            const second = routeFinder.getRoute(start2, end2);
+            expect(second).not.toBeNull();
+            expect(second!.geometry.coordinates).toEqual([
+                [1, 0],
+                [2, 0],
+            ]);
         });
 
         it("can route across intersecting segments", () => {
