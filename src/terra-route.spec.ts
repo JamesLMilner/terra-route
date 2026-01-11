@@ -60,6 +60,121 @@ describe("TerraRoute", () => {
             expect(() => routeFinder.getRoute(start, end)).toThrow("Network not built. Please call buildRouteGraph(network) first.");
         })
 
+        it("returns null when the start equals the end", () => {
+            const network = createFeatureCollection([
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 0],
+                ]),
+            ]);
+
+            routeFinder.buildRouteGraph(network);
+
+            const point = createPointFeature([0, 0]);
+            expect(routeFinder.getRoute(point, point)).toBeNull();
+        });
+
+        it("returns null when the start and end are not connected (even if both points are new)", () => {
+            const network = createFeatureCollection([
+                // Component A
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 0],
+                ]),
+                // Component B
+                createLineStringFeature([
+                    [10, 0],
+                    [11, 0],
+                ]),
+            ]);
+
+            routeFinder.buildRouteGraph(network);
+
+            // Use points not present in the network.
+            const start = createPointFeature([100, 100]);
+            const end = createPointFeature([101, 101]);
+
+            expect(routeFinder.getRoute(start, end)).toBeNull();
+        });
+
+        it("doesn't throw when you request a route between two points not in the network", () => {
+            const network = createFeatureCollection([
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 0],
+                ]),
+            ]);
+
+            routeFinder.buildRouteGraph(network);
+
+            // Both points are outside the network; the implementation should handle this gracefully.
+            const start = createPointFeature([2, 0]);
+            const end = createPointFeature([3, 0]);
+
+            // Still disconnected, so route is null.
+            expect(routeFinder.getRoute(start, end)).toBeNull();
+
+            // Sanity check (implementation detail): internal structures remain consistent after adding new points.
+            type TerraRouteInternals = {
+                csrOffsets: Int32Array | null;
+                csrNodeCount: number;
+                coordinates: unknown[];
+            };
+            const internal = routeFinder as unknown as TerraRouteInternals;
+            expect(internal.csrOffsets).toBeDefined();
+            expect(internal.csrNodeCount).toBe(internal.coordinates.length);
+            expect(internal.csrOffsets!.length).toBe(internal.csrNodeCount + 1);
+        });
+
+        it("can route between two points added at runtime when the link is provided", () => {
+            const network = createFeatureCollection([
+                // Base network doesn't matter; we will force a mode that relies on runtime-added links.
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 0],
+                ]),
+            ]);
+
+            routeFinder.buildRouteGraph(network);
+
+            // Force a mode that relies on the runtime adjacency list.
+            type TerraRouteInternals = {
+                csrOffsets: Int32Array | null;
+                csrIndices: Int32Array | null;
+                csrDistances: Float64Array | null;
+                csrNodeCount: number;
+                coordinateIndexMap: Map<number, Map<number, number>>;
+                adjacencyList: Array<Array<{ node: number; distance: number }>>;
+            };
+
+            const internal = routeFinder as unknown as TerraRouteInternals;
+            internal.csrOffsets = null;
+            internal.csrIndices = null;
+            internal.csrDistances = null;
+            internal.csrNodeCount = 0;
+
+            // Create two new points and then connect them via a runtime-provided link.
+            const start = createPointFeature([5, 5]);
+            const end = createPointFeature([6, 5]);
+
+            // First call creates internal nodes (still no route).
+            expect(routeFinder.getRoute(start, end)).toBeNull();
+
+            const startIndex = internal.coordinateIndexMap.get(5)!.get(5)!;
+            const endIndex = internal.coordinateIndexMap.get(6)!.get(5)!;
+
+            // Add a link both ways so routing can traverse.
+            internal.adjacencyList[startIndex].push({ node: endIndex, distance: 1 });
+            internal.adjacencyList[endIndex].push({ node: startIndex, distance: 1 });
+
+            const route = routeFinder.getRoute(start, end);
+            expect(route).not.toBeNull();
+            expect(route!.geometry.coordinates).toEqual([
+                [5, 5],
+                [6, 5],
+            ]);
+        });
+
         it("finds the correct shortest route in a simple connected graph", () => {
             const network = createFeatureCollection([
                 createLineStringFeature([
