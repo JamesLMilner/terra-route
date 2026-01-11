@@ -194,7 +194,6 @@ class TerraRoute implements Router {
         // Local aliases
         const coords = this.coordinates; // Alias to coordinates array
         const adj = this.adjacencyList; // Alias to sparse adjacency list (for dynamic nodes)
-        const measureDistance = this.distanceMeasurement; // Alias to distance function
 
         // Ensure and init scratch buffers
         const nodeCount = coords.length; // Current number of nodes (may be >= csrNodeCount if new nodes added)
