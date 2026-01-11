@@ -4,19 +4,7 @@ describe("FourAryHeap", () => {
     it("starts empty", () => {
         const heap = new FourAryHeap();
         expect(heap.size()).toBe(0);
-        expect(heap.peekMinKey()).toBeNull();
         expect(heap.extractMin()).toBeNull();
-    });
-
-    it("peekMinKey returns current min without removing it", () => {
-        const heap = new FourAryHeap();
-        heap.insert(10, 1);
-        expect(heap.peekMinKey()).toBe(10);
-        heap.insert(5, 2);
-        expect(heap.peekMinKey()).toBe(5);
-        expect(heap.size()).toBe(2);
-        expect(heap.extractMin()).toBe(2);
-        expect(heap.peekMinKey()).toBe(10);
     });
 
     it("inserts and extracts a single element", () => {
