@@ -87,5 +87,86 @@ describe("TerraRoute", () => {
             }
         });
 
+        it('matches route created from GeoJSON Path Finder when network is expanded in two halves', () => {
+            const network = JSON.parse(readFileSync('src/data/network.geojson', 'utf-8')) as FeatureCollection<LineString>;
+
+            const mid = Math.floor(network.features.length / 2);
+            const firstHalf: FeatureCollection<LineString> = {
+                type: 'FeatureCollection',
+                features: network.features.slice(0, mid)
+            };
+            const secondHalf: FeatureCollection<LineString> = {
+                type: 'FeatureCollection',
+                features: network.features.slice(mid)
+            };
+
+            const pairs: [Position, Position][] = [];
+
+            // Use the full network to create representative pairs across the whole graph
+            for (let i = 0, j = network.features.length - 1; i < j; i++, j--) {
+                const coordsA = network.features[i].geometry.coordinates;
+                const coordsB = network.features[j].geometry.coordinates;
+
+                const midA = Math.floor(coordsA.length / 2);
+                const midB = Math.floor(coordsB.length / 2);
+
+                pairs.push([
+                    coordsA[midA] as Position,
+                    coordsB[midB] as Position
+                ]);
+            }
+
+            for (let i = 0, j = network.features.length - 1; i < j; i++, j--) {
+                const coordsA = network.features[i].geometry.coordinates;
+                const coordsB = network.features[j].geometry.coordinates;
+
+                pairs.push([
+                    coordsA[0] as Position,
+                    coordsB[coordsB.length - 1] as Position
+                ]);
+            }
+
+            const terraRoute = new TerraRoute();
+            terraRoute.buildRouteGraph(firstHalf);
+            terraRoute.expandRouteGraph(secondHalf);
+
+            const pathFinder = new PathFinder(network as FeatureCollection<LineString>, {
+                // Mimic points having to be identical
+                tolerance: 0.000000000000000000001,
+                weight: (a, b) => haversineDistance(a, b)
+            });
+
+            for (let i = 0; i < pairs.length; i++) {
+                const startIsEnd = pairs[i][0][0] === pairs[i][1][0] && pairs[i][0][1] === pairs[i][1][1]
+                if (startIsEnd) {
+                    continue;
+                }
+
+                const start = createPointFeature(pairs[i][0]);
+                const end = createPointFeature(pairs[i][1]);
+
+                const route = pathFinder.findPath(start, end);
+                expect(route).not.toBeNull();
+
+                // Route not found
+                if (!route || route.path.length <= 1) {
+                    const routeFromTerraRoute = terraRoute.getRoute(start, end);
+                    expect(routeFromTerraRoute).toBeNull();
+                    continue
+                }
+
+                const routeFromPathFinder = pathToGeoJSON(route);
+                expect(routeFromPathFinder).toBeDefined();
+
+                const routeFromTerraRoute = terraRoute.getRoute(start, end);
+                expect(routeFromTerraRoute).not.toBeNull();
+
+                const pathFinderLength = routeLength(routeFromPathFinder!);
+                const terraDrawLength = routeLength(routeFromTerraRoute!);
+
+                expect(pathFinderLength).toBeGreaterThanOrEqual(terraDrawLength);
+            }
+        });
+
     })
 });
