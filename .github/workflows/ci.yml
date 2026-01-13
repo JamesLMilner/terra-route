@@ -17,9 +17,9 @@ jobs:
       - name: Use Node
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
       - name: Install Parent Folder
-        run: npm install
+        run: npm ci
       - name: Run linting
         run: npm run lint
 
@@ -30,9 +30,9 @@ jobs:
       - name: Use Node
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
       - name: Install Parent Folder
-        run: npm install
+        run: npm ci
       - name: Run unused code checking
         run: npm run unused
 
@@ -43,9 +43,9 @@ jobs:
       - name: Use Node
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
       - name: Install Parent Folder
-        run: npm install
+        run: npm ci
       - name: Ensure no package-lock.json changes
         run: git diff --exit-code
       - name: Build
@@ -58,10 +58,23 @@ jobs:
       - name: Use Node
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
       - name: Install Parent Folder
-        run: npm install
+        run: npm ci
       - name: Test
         run: npm run test
         env:
           CI: true
+
+  analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+      - name: Install Parent Folder
+        run: npm ci
+      - name: TypeScript Analyser
+        run: npm run analysis
