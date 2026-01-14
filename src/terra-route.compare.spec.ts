@@ -82,8 +82,7 @@ describe("TerraRoute", () => {
                 const pathFinderLength = routeLength(routeFromPathFinder!)
                 const terraRouteLength = routeLength(routeFromTerraRoute!);
 
-                expect(pathFinderLength).toBeGreaterThanOrEqual(terraRouteLength);
-
+                expect(terraRouteLength).toBeLessThanOrEqual(pathFinderLength);
             }
         });
 
@@ -164,7 +163,7 @@ describe("TerraRoute", () => {
                 const pathFinderLength = routeLength(routeFromPathFinder!);
                 const terraRouteLength = routeLength(routeFromTerraRoute!);
 
-                expect(pathFinderLength).toBeGreaterThanOrEqual(terraRouteLength);
+                expect(terraRouteLength).toBeLessThanOrEqual(pathFinderLength);
             }
         });
 
