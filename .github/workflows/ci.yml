@@ -77,4 +77,4 @@ jobs:
       - name: Install Parent Folder
         run: npm ci
       - name: TypeScript Analyser
-        run: npm run analysis
+        run: npm run analyze
