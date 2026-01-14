@@ -114,6 +114,15 @@ export class FibonacciHeap implements Heap {
         return this.totalNodes;
     }
 
+    public peekMinKey(): number {
+        return this.minNode === null ? Number.POSITIVE_INFINITY : this.minNode.key;
+    }
+
+    public clear(): void {
+        this.minNode = null;
+        this.totalNodes = 0;
+    }
+
     // --------------------------- internal helpers --------------------------- //
 
     /**

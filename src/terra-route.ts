@@ -39,6 +39,11 @@ class TerraRoute implements Router {
     private hRevScratch: Float64Array | null = null; // Heuristic cache for reverse direction per query
     private scratchCapacity = 0; // Current capacity of scratch arrays
 
+    // Reused open sets to avoid heap allocations during repeated getRoute calls.
+    // (If a custom heap doesn't implement `clear()`, we fall back to constructing anew.)
+    private openForward: InstanceType<HeapConstructor> | null = null;
+    private openReverse: InstanceType<HeapConstructor> | null = null;
+
     constructor(options?: {
         distanceMeasurement?: (a: Position, b: Position) => number; // Optional distance function override
         heap?: HeapConstructor; // Optional heap implementation override
@@ -289,36 +294,60 @@ class TerraRoute implements Router {
         const openF = new this.heapConstructor();
         const openR = new this.heapConstructor();
 
+        // Prefer reusing heaps if supported.
+        const openFReuse = this.openForward ?? (this.openForward = new this.heapConstructor());
+        const openRReuse = this.openReverse ?? (this.openReverse = new this.heapConstructor());
+
+        const openFAny = openFReuse as unknown as { clear?: () => void };
+        const openRAny = openRReuse as unknown as { clear?: () => void };
+        const canReuse = !!openFAny.clear && !!openRAny.clear;
+
+        const openF2 = canReuse ? openFReuse : openF;
+        const openR2 = canReuse ? openRReuse : openR;
+
+        if (canReuse) {
+            openFAny.clear!();
+            openRAny.clear!();
+        }
+
         const startCoord = coords[startIndex];
         const endCoord = coords[endIndex];
+
+        const measureDistance = this.distanceMeasurement;
 
         gF[startIndex] = 0;
         gR[endIndex] = 0;
 
-        // Bidirectional Dijkstra (A* with zero heuristic). This keeps correctness simple and matches the
-        // reference pathfinder while still saving work by meeting in the middle.
-        openF.insert(0, startIndex);
-        openR.insert(0, endIndex);
+        // Bidirectional Dijkstra. This keeps correctness simple while saving work by meeting in the middle.
+        openF2.insert(0, startIndex);
+        openR2.insert(0, endIndex);
 
         // Best meeting point found so far
         let bestPathCost = Number.POSITIVE_INFINITY;
         let meetingNode = -1;
 
         // Main bidirectional loop: expand alternately.
-        // Without a heap peek, a safe and effective stopping rule is based on the last extracted keys:
-        // once min_g_forward + min_g_reverse >= bestPathCost, no shorter path can still be found.
+        // Stopping rule: if current best path <= minF(openF) + minF(openR) then we can't improve.
+        // When peek isn't available (custom heap), we fall back to a looser but safe g-based rule.
         let lastExtractedGForward = 0;
         let lastExtractedGReverse = 0;
-        while (openF.size() > 0 && openR.size() > 0) {
-            if (meetingNode >= 0 && (lastExtractedGForward + lastExtractedGReverse) >= bestPathCost) {
-                break;
+        while (openF2.size() > 0 && openR2.size() > 0) {
+            if (meetingNode >= 0) {
+                const openFPeek = openF2 as unknown as { peekMinKey?: () => number };
+                const openRPeek = openR2 as unknown as { peekMinKey?: () => number };
+                if (openFPeek.peekMinKey && openRPeek.peekMinKey) {
+                    // Heaps are keyed by g, so this is the standard bidirectional Dijkstra bound.
+                    if ((openFPeek.peekMinKey() + openRPeek.peekMinKey()) >= bestPathCost) break;
+                } else {
+                    if ((lastExtractedGForward + lastExtractedGReverse) >= bestPathCost) break;
+                }
             }
 
             // Expand one step from each side, prioritizing the smaller frontier.
-            const expandForward = openF.size() <= openR.size();
+            const expandForward = openF2.size() <= openR2.size();
 
             if (expandForward) {
-                const current = openF.extractMin()!;
+                const current = openF2.extractMin()!;
                 if (visF[current] !== 0) continue;
                 lastExtractedGForward = gF[current];
                 visF[current] = 1;
@@ -348,7 +377,7 @@ class TerraRoute implements Router {
                                 const total = tentativeG + otherG;
                                 if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
                             }
-                            openF.insert(tentativeG, nbNode);
+                            openF2.insert(tentativeG, nbNode);
                         }
                     }
                 } else {
@@ -366,13 +395,13 @@ class TerraRoute implements Router {
                                     const total = tentativeG + otherG;
                                     if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
                                 }
-                                openF.insert(tentativeG, nbNode);
+                                openF2.insert(tentativeG, nbNode);
                             }
                         }
                     }
                 }
             } else {
-                const current = openR.extractMin()!;
+                const current = openR2.extractMin()!;
                 if (visR[current] !== 0) continue;
                 lastExtractedGReverse = gR[current];
                 visR[current] = 1;
@@ -402,7 +431,7 @@ class TerraRoute implements Router {
                                 const total = tentativeG + otherG;
                                 if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
                             }
-                            openR.insert(tentativeG, nbNode);
+                            openR2.insert(tentativeG, nbNode);
                         }
                     }
                 } else {
@@ -420,7 +449,7 @@ class TerraRoute implements Router {
                                     const total = tentativeG + otherG;
                                     if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
                                 }
-                                openR.insert(tentativeG, nbNode);
+                                openR2.insert(tentativeG, nbNode);
                             }
                         }
                     }
