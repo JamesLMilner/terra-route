@@ -27,16 +27,14 @@ class TerraRoute implements Router {
     private csrDistances: Float64Array | null = null;  // Edge weights aligned to csrIndices, length = totalEdges
     private csrNodeCount = 0; // Number of nodes captured in the CSR arrays
 
-    // Reusable typed scratch buffers for A*
+    // Reusable typed scratch buffers for shortest-path search
     private gScoreScratch: Float64Array | null = null; // gScore per node (cost from start)
     private cameFromScratch: Int32Array | null = null; // Predecessor per node for path reconstruction
     private visitedScratch: Uint8Array | null = null; // Visited set to avoid reprocessing
-    private hScratch: Float64Array | null = null; // Per-node heuristic cache for the current query (lazy compute)
     // Reverse-direction scratch for bidirectional search
     private gScoreRevScratch: Float64Array | null = null; // gScore per node from the end
     private cameFromRevScratch: Int32Array | null = null; // Successor per node (next step toward the end)
     private visitedRevScratch: Uint8Array | null = null; // Visited set for reverse search
-    private hRevScratch: Float64Array | null = null; // Heuristic cache for reverse direction per query
     private scratchCapacity = 0; // Current capacity of scratch arrays
 
     // Reused open sets to avoid heap allocations during repeated getRoute calls.
@@ -279,8 +277,6 @@ class TerraRoute implements Router {
         const nextR = this.cameFromRevScratch!; // successor in reverse search (toward end)
         const visF = this.visitedScratch!;
         const visR = this.visitedRevScratch!;
-        const hF = this.hScratch!;
-        const hR = this.hRevScratch!;
 
         gF.fill(Number.POSITIVE_INFINITY, 0, nodeCount);
         gR.fill(Number.POSITIVE_INFINITY, 0, nodeCount);
@@ -288,11 +284,6 @@ class TerraRoute implements Router {
         nextR.fill(-1, 0, nodeCount);
         visF.fill(0, 0, nodeCount);
         visR.fill(0, 0, nodeCount);
-        hF.fill(-1, 0, nodeCount);
-        hR.fill(-1, 0, nodeCount);
-
-        const openF = new this.heapConstructor();
-        const openR = new this.heapConstructor();
 
         // Prefer reusing heaps if supported.
         const openFReuse = this.openForward ?? (this.openForward = new this.heapConstructor());
@@ -302,18 +293,13 @@ class TerraRoute implements Router {
         const openRAny = openRReuse as unknown as { clear?: () => void };
         const canReuse = !!openFAny.clear && !!openRAny.clear;
 
-        const openF2 = canReuse ? openFReuse : openF;
-        const openR2 = canReuse ? openRReuse : openR;
+        const openF2 = canReuse ? openFReuse : new this.heapConstructor();
+        const openR2 = canReuse ? openRReuse : new this.heapConstructor();
 
         if (canReuse) {
             openFAny.clear!();
             openRAny.clear!();
         }
-
-        const startCoord = coords[startIndex];
-        const endCoord = coords[endIndex];
-
-        const measureDistance = this.distanceMeasurement;
 
         gF[startIndex] = 0;
         gR[endIndex] = 0;
@@ -545,11 +531,9 @@ class TerraRoute implements Router {
             && this.gScoreScratch
             && this.cameFromScratch
             && this.visitedScratch
-            && this.hScratch
             && this.gScoreRevScratch
             && this.cameFromRevScratch
-            && this.visitedRevScratch
-            && this.hRevScratch;
+            && this.visitedRevScratch;
 
         if (ifAlreadyBigEnough) {
             return; // Nothing to do
@@ -558,11 +542,9 @@ class TerraRoute implements Router {
         this.gScoreScratch = new Float64Array(capacity);
         this.cameFromScratch = new Int32Array(capacity);
         this.visitedScratch = new Uint8Array(capacity);
-        this.hScratch = new Float64Array(capacity);
         this.gScoreRevScratch = new Float64Array(capacity);
         this.cameFromRevScratch = new Int32Array(capacity);
         this.visitedRevScratch = new Uint8Array(capacity);
-        this.hRevScratch = new Float64Array(capacity);
         this.scratchCapacity = capacity;
     }
 
