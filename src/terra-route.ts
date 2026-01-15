@@ -348,43 +348,49 @@ class TerraRoute implements Router {
                 }
 
                 // Relax neighbors and push newly improved ones
-                if (this.csrOffsets && current < this.csrNodeCount) {
-                    const csrOffsets = this.csrOffsets!;
-                    const csrIndices = this.csrIndices!;
-                    const csrDistances = this.csrDistances!;
-                    for (let i = csrOffsets[current], endOff = csrOffsets[current + 1]; i < endOff; i++) {
-                        const nbNode = csrIndices[i];
-                        const tentativeG = gF[current] + csrDistances[i];
-                        if (tentativeG < gF[nbNode]) {
-                            gF[nbNode] = tentativeG;
-                            prevF[nbNode] = current;
-                            const otherG = gR[nbNode];
-                            if (otherG !== Number.POSITIVE_INFINITY) {
-                                const total = tentativeG + otherG;
-                                if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
-                            }
-                            openF2.insert(tentativeG, nbNode);
-                        }
-                    }
-                } else {
+                const isCsrNode = !!this.csrOffsets && current < this.csrNodeCount;
+                if (!isCsrNode) {
                     const neighbors = adj[current];
-                    if (neighbors && neighbors.length) {
-                        for (let i = 0, n = neighbors.length; i < n; i++) {
-                            const nb = neighbors[i];
-                            const nbNode = nb.node;
-                            const tentativeG = gF[current] + nb.distance;
-                            if (tentativeG < gF[nbNode]) {
-                                gF[nbNode] = tentativeG;
-                                prevF[nbNode] = current;
-                                const otherG = gR[nbNode];
-                                if (otherG !== Number.POSITIVE_INFINITY) {
-                                    const total = tentativeG + otherG;
-                                    if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
-                                }
-                                openF2.insert(tentativeG, nbNode);
-                            }
+                    if (!neighbors || neighbors.length === 0) continue;
+
+                    for (let i = 0, n = neighbors.length; i < n; i++) {
+                        const nb = neighbors[i];
+                        const nbNode = nb.node;
+                        const tentativeG = gF[current] + nb.distance;
+                        if (tentativeG >= gF[nbNode]) continue;
+
+                        gF[nbNode] = tentativeG;
+                        prevF[nbNode] = current;
+
+                        const otherG = gR[nbNode];
+                        if (otherG !== Number.POSITIVE_INFINITY) {
+                            const total = tentativeG + otherG;
+                            if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
                         }
+
+                        openF2.insert(tentativeG, nbNode);
                     }
+                    continue;
+                }
+
+                const csrOffsets = this.csrOffsets!;
+                const csrIndices = this.csrIndices!;
+                const csrDistances = this.csrDistances!;
+                for (let i = csrOffsets[current], endOff = csrOffsets[current + 1]; i < endOff; i++) {
+                    const nbNode = csrIndices[i];
+                    const tentativeG = gF[current] + csrDistances[i];
+                    if (tentativeG >= gF[nbNode]) continue;
+
+                    gF[nbNode] = tentativeG;
+                    prevF[nbNode] = current;
+
+                    const otherG = gR[nbNode];
+                    if (otherG !== Number.POSITIVE_INFINITY) {
+                        const total = tentativeG + otherG;
+                        if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
+                    }
+
+                    openF2.insert(tentativeG, nbNode);
                 }
             } else {
                 const current = openR2.extractMin()!;
@@ -402,43 +408,49 @@ class TerraRoute implements Router {
 
                 // Reverse direction: same neighbor iteration because graph is undirected.
                 // Store successor pointer (next step toward end) i.e. nextR[neighbor] = current.
-                if (this.csrOffsets && current < this.csrNodeCount) {
-                    const csrOffsets = this.csrOffsets!;
-                    const csrIndices = this.csrIndices!;
-                    const csrDistances = this.csrDistances!;
-                    for (let i = csrOffsets[current], endOff = csrOffsets[current + 1]; i < endOff; i++) {
-                        const nbNode = csrIndices[i];
-                        const tentativeG = gR[current] + csrDistances[i];
-                        if (tentativeG < gR[nbNode]) {
-                            gR[nbNode] = tentativeG;
-                            nextR[nbNode] = current;
-                            const otherG = gF[nbNode];
-                            if (otherG !== Number.POSITIVE_INFINITY) {
-                                const total = tentativeG + otherG;
-                                if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
-                            }
-                            openR2.insert(tentativeG, nbNode);
-                        }
-                    }
-                } else {
+                const isCsrNode = !!this.csrOffsets && current < this.csrNodeCount;
+                if (!isCsrNode) {
                     const neighbors = adj[current];
-                    if (neighbors && neighbors.length) {
-                        for (let i = 0, n = neighbors.length; i < n; i++) {
-                            const nb = neighbors[i];
-                            const nbNode = nb.node;
-                            const tentativeG = gR[current] + nb.distance;
-                            if (tentativeG < gR[nbNode]) {
-                                gR[nbNode] = tentativeG;
-                                nextR[nbNode] = current;
-                                const otherG = gF[nbNode];
-                                if (otherG !== Number.POSITIVE_INFINITY) {
-                                    const total = tentativeG + otherG;
-                                    if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
-                                }
-                                openR2.insert(tentativeG, nbNode);
-                            }
+                    if (!neighbors || neighbors.length === 0) continue;
+
+                    for (let i = 0, n = neighbors.length; i < n; i++) {
+                        const nb = neighbors[i];
+                        const nbNode = nb.node;
+                        const tentativeG = gR[current] + nb.distance;
+                        if (tentativeG >= gR[nbNode]) continue;
+
+                        gR[nbNode] = tentativeG;
+                        nextR[nbNode] = current;
+
+                        const otherG = gF[nbNode];
+                        if (otherG !== Number.POSITIVE_INFINITY) {
+                            const total = tentativeG + otherG;
+                            if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
                         }
+
+                        openR2.insert(tentativeG, nbNode);
                     }
+                    continue;
+                }
+
+                const csrOffsets = this.csrOffsets!;
+                const csrIndices = this.csrIndices!;
+                const csrDistances = this.csrDistances!;
+                for (let i = csrOffsets[current], endOff = csrOffsets[current + 1]; i < endOff; i++) {
+                    const nbNode = csrIndices[i];
+                    const tentativeG = gR[current] + csrDistances[i];
+                    if (tentativeG >= gR[nbNode]) continue;
+
+                    gR[nbNode] = tentativeG;
+                    nextR[nbNode] = current;
+
+                    const otherG = gF[nbNode];
+                    if (otherG !== Number.POSITIVE_INFINITY) {
+                        const total = tentativeG + otherG;
+                        if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
+                    }
+
+                    openR2.insert(tentativeG, nbNode);
                 }
             }
         }
