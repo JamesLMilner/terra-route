@@ -1,0 +1,9 @@
+{
+  "exclude_filenames": [
+    "**/*.spec.ts",
+    "**/*.test.ts",
+    "**/__tests__/**",
+    "**/*.spec.tsx",
+    "**/*.test.tsx"
+  ]
+}
