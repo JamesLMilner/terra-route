@@ -263,11 +263,17 @@ class TerraRoute implements Router {
         }
 
         // Local aliases
-        const coords = this.coordinates; // Alias to coordinates array
-        const adj = this.adjacencyList; // Alias to sparse adjacency list (for dynamic nodes)
+        const coordinates = this.coordinates; // Alias to coordinates array
+        const adjacency = this.adjacencyList; // Alias to sparse adjacency list (for dynamic nodes)
+        const csrOffsets = this.csrOffsets;
+        const csrIndices = this.csrIndices;
+        const csrDistances = this.csrDistances;
+        const csrNodeCount = this.csrNodeCount;
+        const hasCsr = !!csrOffsets; // indices/distances should exist whenever offsets exist
+        const PositiveInfinity = Number.POSITIVE_INFINITY;
 
         // Ensure and init scratch buffers
-        const nodeCount = coords.length; // Current number of nodes (may be >= csrNodeCount if new nodes added)
+        const nodeCount = coordinates.length; // Current number of nodes (may be >= csrNodeCount if new nodes added)
         this.ensureScratch(nodeCount); // Allocate scratch arrays if needed
 
         // Non-null after ensure
@@ -278,8 +284,8 @@ class TerraRoute implements Router {
         const visF = this.visitedScratch!;
         const visR = this.visitedRevScratch!;
 
-        gF.fill(Number.POSITIVE_INFINITY, 0, nodeCount);
-        gR.fill(Number.POSITIVE_INFINITY, 0, nodeCount);
+        gF.fill(PositiveInfinity, 0, nodeCount);
+        gR.fill(PositiveInfinity, 0, nodeCount);
         prevF.fill(-1, 0, nodeCount);
         nextR.fill(-1, 0, nodeCount);
         visF.fill(0, 0, nodeCount);
@@ -317,13 +323,16 @@ class TerraRoute implements Router {
         // When peek isn't available (custom heap), we fall back to a looser but safe g-based rule.
         let lastExtractedGForward = 0;
         let lastExtractedGReverse = 0;
+
+        // Cache peek capability once (custom heaps may not implement it)
+        const openFPeek = openF2 as unknown as { peekMinKey?: () => number };
+        const openRPeek = openR2 as unknown as { peekMinKey?: () => number };
+        const canPeek = !!openFPeek.peekMinKey && !!openRPeek.peekMinKey;
         while (openF2.size() > 0 && openR2.size() > 0) {
             if (meetingNode >= 0) {
-                const openFPeek = openF2 as unknown as { peekMinKey?: () => number };
-                const openRPeek = openR2 as unknown as { peekMinKey?: () => number };
-                if (openFPeek.peekMinKey && openRPeek.peekMinKey) {
+                if (canPeek) {
                     // Heaps are keyed by g, so this is the standard bidirectional Dijkstra bound.
-                    if ((openFPeek.peekMinKey() + openRPeek.peekMinKey()) >= bestPathCost) break;
+                    if ((openFPeek.peekMinKey!() + openRPeek.peekMinKey!()) >= bestPathCost) break;
                 } else {
                     if ((lastExtractedGForward + lastExtractedGReverse) >= bestPathCost) break;
                 }
@@ -348,9 +357,9 @@ class TerraRoute implements Router {
                 }
 
                 // Relax neighbors and push newly improved ones
-                const isCsrNode = !!this.csrOffsets && current < this.csrNodeCount;
+                const isCsrNode = hasCsr && current < csrNodeCount;
                 if (!isCsrNode) {
-                    const neighbors = adj[current];
+                    const neighbors = adjacency[current];
                     if (!neighbors || neighbors.length === 0) continue;
 
                     for (let i = 0, n = neighbors.length; i < n; i++) {
@@ -363,7 +372,7 @@ class TerraRoute implements Router {
                         prevF[nbNode] = current;
 
                         const otherG = gR[nbNode];
-                        if (otherG !== Number.POSITIVE_INFINITY) {
+                        if (otherG !== PositiveInfinity) {
                             const total = tentativeG + otherG;
                             if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
                         }
@@ -373,19 +382,16 @@ class TerraRoute implements Router {
                     continue;
                 }
 
-                const csrOffsets = this.csrOffsets!;
-                const csrIndices = this.csrIndices!;
-                const csrDistances = this.csrDistances!;
-                for (let i = csrOffsets[current], endOff = csrOffsets[current + 1]; i < endOff; i++) {
-                    const nbNode = csrIndices[i];
-                    const tentativeG = gF[current] + csrDistances[i];
+                for (let i = csrOffsets![current], endOff = csrOffsets![current + 1]; i < endOff; i++) {
+                    const nbNode = csrIndices![i];
+                    const tentativeG = gF[current] + csrDistances![i];
                     if (tentativeG >= gF[nbNode]) continue;
 
                     gF[nbNode] = tentativeG;
                     prevF[nbNode] = current;
 
                     const otherG = gR[nbNode];
-                    if (otherG !== Number.POSITIVE_INFINITY) {
+                    if (otherG !== PositiveInfinity) {
                         const total = tentativeG + otherG;
                         if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
                     }
@@ -408,9 +414,9 @@ class TerraRoute implements Router {
 
                 // Reverse direction: same neighbor iteration because graph is undirected.
                 // Store successor pointer (next step toward end) i.e. nextR[neighbor] = current.
-                const isCsrNode = !!this.csrOffsets && current < this.csrNodeCount;
+                const isCsrNode = hasCsr && current < csrNodeCount;
                 if (!isCsrNode) {
-                    const neighbors = adj[current];
+                    const neighbors = adjacency[current];
                     if (!neighbors || neighbors.length === 0) continue;
 
                     for (let i = 0, n = neighbors.length; i < n; i++) {
@@ -423,7 +429,7 @@ class TerraRoute implements Router {
                         nextR[nbNode] = current;
 
                         const otherG = gF[nbNode];
-                        if (otherG !== Number.POSITIVE_INFINITY) {
+                        if (otherG !== PositiveInfinity) {
                             const total = tentativeG + otherG;
                             if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
                         }
@@ -433,19 +439,16 @@ class TerraRoute implements Router {
                     continue;
                 }
 
-                const csrOffsets = this.csrOffsets!;
-                const csrIndices = this.csrIndices!;
-                const csrDistances = this.csrDistances!;
-                for (let i = csrOffsets[current], endOff = csrOffsets[current + 1]; i < endOff; i++) {
-                    const nbNode = csrIndices[i];
-                    const tentativeG = gR[current] + csrDistances[i];
+                for (let i = csrOffsets![current], endOff = csrOffsets![current + 1]; i < endOff; i++) {
+                    const nbNode = csrIndices![i];
+                    const tentativeG = gR[current] + csrDistances![i];
                     if (tentativeG >= gR[nbNode]) continue;
 
                     gR[nbNode] = tentativeG;
                     nextR[nbNode] = current;
 
                     const otherG = gF[nbNode];
-                    if (otherG !== Number.POSITIVE_INFINITY) {
+                    if (otherG !== PositiveInfinity) {
                         const total = tentativeG + otherG;
                         if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
                     }
@@ -465,14 +468,14 @@ class TerraRoute implements Router {
         // Walk back from meeting to start, collecting nodes
         let cur = meetingNode;
         while (cur !== startIndex && cur >= 0) {
-            path.push(coords[cur]);
+            path.push(coordinates[cur]);
             cur = prevF[cur];
         }
         if (cur !== startIndex) {
             // Forward tree doesn't connect start to meeting (shouldn't happen if meeting is valid)
             return null;
         }
-        path.push(coords[startIndex]);
+        path.push(coordinates[startIndex]);
         path.reverse();
 
         // Walk from meeting to end (skip meeting node because it's already included)
@@ -482,7 +485,7 @@ class TerraRoute implements Router {
             if (cur < 0) {
                 return null;
             }
-            path.push(coords[cur]);
+            path.push(coordinates[cur]);
         }
 
         return {
