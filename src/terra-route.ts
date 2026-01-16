@@ -27,17 +27,20 @@ class TerraRoute implements Router {
     private csrDistances: Float64Array | null = null;  // Edge weights aligned to csrIndices, length = totalEdges
     private csrNodeCount = 0; // Number of nodes captured in the CSR arrays
 
-    // Reusable typed scratch buffers for A*
+    // Reusable typed scratch buffers for shortest-path search
     private gScoreScratch: Float64Array | null = null; // gScore per node (cost from start)
     private cameFromScratch: Int32Array | null = null; // Predecessor per node for path reconstruction
     private visitedScratch: Uint8Array | null = null; // Visited set to avoid reprocessing
-    private hScratch: Float64Array | null = null; // Per-node heuristic cache for the current query (lazy compute)
     // Reverse-direction scratch for bidirectional search
     private gScoreRevScratch: Float64Array | null = null; // gScore per node from the end
     private cameFromRevScratch: Int32Array | null = null; // Successor per node (next step toward the end)
     private visitedRevScratch: Uint8Array | null = null; // Visited set for reverse search
-    private hRevScratch: Float64Array | null = null; // Heuristic cache for reverse direction per query
     private scratchCapacity = 0; // Current capacity of scratch arrays
+
+    // Reused open sets to avoid heap allocations during repeated getRoute calls.
+    // (If a custom heap doesn't implement `clear()`, we fall back to constructing anew.)
+    private openForward: InstanceType<HeapConstructor> | null = null;
+    private openReverse: InstanceType<HeapConstructor> | null = null;
 
     constructor(options?: {
         distanceMeasurement?: (a: Position, b: Position) => number; // Optional distance function override
@@ -260,11 +263,17 @@ class TerraRoute implements Router {
         }
 
         // Local aliases
-        const coords = this.coordinates; // Alias to coordinates array
-        const adj = this.adjacencyList; // Alias to sparse adjacency list (for dynamic nodes)
+        const coordinates = this.coordinates; // Alias to coordinates array
+        const adjacency = this.adjacencyList; // Alias to sparse adjacency list (for dynamic nodes)
+        const csrOffsets = this.csrOffsets;
+        const csrIndices = this.csrIndices;
+        const csrDistances = this.csrDistances;
+        const csrNodeCount = this.csrNodeCount;
+        const hasCsr = !!csrOffsets; // indices/distances should exist whenever offsets exist
+        const PositiveInfinity = Number.POSITIVE_INFINITY;
 
         // Ensure and init scratch buffers
-        const nodeCount = coords.length; // Current number of nodes (may be >= csrNodeCount if new nodes added)
+        const nodeCount = coordinates.length; // Current number of nodes (may be >= csrNodeCount if new nodes added)
         this.ensureScratch(nodeCount); // Allocate scratch arrays if needed
 
         // Non-null after ensure
@@ -274,51 +283,66 @@ class TerraRoute implements Router {
         const nextR = this.cameFromRevScratch!; // successor in reverse search (toward end)
         const visF = this.visitedScratch!;
         const visR = this.visitedRevScratch!;
-        const hF = this.hScratch!;
-        const hR = this.hRevScratch!;
 
-        gF.fill(Number.POSITIVE_INFINITY, 0, nodeCount);
-        gR.fill(Number.POSITIVE_INFINITY, 0, nodeCount);
+        gF.fill(PositiveInfinity, 0, nodeCount);
+        gR.fill(PositiveInfinity, 0, nodeCount);
         prevF.fill(-1, 0, nodeCount);
         nextR.fill(-1, 0, nodeCount);
         visF.fill(0, 0, nodeCount);
         visR.fill(0, 0, nodeCount);
-        hF.fill(-1, 0, nodeCount);
-        hR.fill(-1, 0, nodeCount);
 
-        const openF = new this.heapConstructor();
-        const openR = new this.heapConstructor();
+        // Prefer reusing heaps if supported.
+        const openFReuse = this.openForward ?? (this.openForward = new this.heapConstructor());
+        const openRReuse = this.openReverse ?? (this.openReverse = new this.heapConstructor());
 
-        const startCoord = coords[startIndex];
-        const endCoord = coords[endIndex];
+        const openFAny = openFReuse as unknown as { clear?: () => void };
+        const openRAny = openRReuse as unknown as { clear?: () => void };
+        const canReuse = !!openFAny.clear && !!openRAny.clear;
+
+        const openF2 = canReuse ? openFReuse : new this.heapConstructor();
+        const openR2 = canReuse ? openRReuse : new this.heapConstructor();
+
+        if (canReuse) {
+            openFAny.clear!();
+            openRAny.clear!();
+        }
 
         gF[startIndex] = 0;
         gR[endIndex] = 0;
 
-        // Bidirectional Dijkstra (A* with zero heuristic). This keeps correctness simple and matches the
-        // reference pathfinder while still saving work by meeting in the middle.
-        openF.insert(0, startIndex);
-        openR.insert(0, endIndex);
+        // Bidirectional Dijkstra. This keeps correctness simple while saving work by meeting in the middle.
+        openF2.insert(0, startIndex);
+        openR2.insert(0, endIndex);
 
         // Best meeting point found so far
         let bestPathCost = Number.POSITIVE_INFINITY;
         let meetingNode = -1;
 
         // Main bidirectional loop: expand alternately.
-        // Without a heap peek, a safe and effective stopping rule is based on the last extracted keys:
-        // once min_g_forward + min_g_reverse >= bestPathCost, no shorter path can still be found.
+        // Stopping rule: if current best path <= minF(openF) + minF(openR) then we can't improve.
+        // When peek isn't available (custom heap), we fall back to a looser but safe g-based rule.
         let lastExtractedGForward = 0;
         let lastExtractedGReverse = 0;
-        while (openF.size() > 0 && openR.size() > 0) {
-            if (meetingNode >= 0 && (lastExtractedGForward + lastExtractedGReverse) >= bestPathCost) {
-                break;
+
+        // Cache peek capability once (custom heaps may not implement it)
+        const openFPeek = openF2 as unknown as { peekMinKey?: () => number };
+        const openRPeek = openR2 as unknown as { peekMinKey?: () => number };
+        const canPeek = !!openFPeek.peekMinKey && !!openRPeek.peekMinKey;
+        while (openF2.size() > 0 && openR2.size() > 0) {
+            if (meetingNode >= 0) {
+                if (canPeek) {
+                    // Heaps are keyed by g, so this is the standard bidirectional Dijkstra bound.
+                    if ((openFPeek.peekMinKey!() + openRPeek.peekMinKey!()) >= bestPathCost) break;
+                } else {
+                    if ((lastExtractedGForward + lastExtractedGReverse) >= bestPathCost) break;
+                }
             }
 
             // Expand one step from each side, prioritizing the smaller frontier.
-            const expandForward = openF.size() <= openR.size();
+            const expandForward = openF2.size() <= openR2.size();
 
             if (expandForward) {
-                const current = openF.extractMin()!;
+                const current = openF2.extractMin()!;
                 if (visF[current] !== 0) continue;
                 lastExtractedGForward = gF[current];
                 visF[current] = 1;
@@ -333,46 +357,49 @@ class TerraRoute implements Router {
                 }
 
                 // Relax neighbors and push newly improved ones
-                if (this.csrOffsets && current < this.csrNodeCount) {
-                    const csrOffsets = this.csrOffsets!;
-                    const csrIndices = this.csrIndices!;
-                    const csrDistances = this.csrDistances!;
-                    for (let i = csrOffsets[current], endOff = csrOffsets[current + 1]; i < endOff; i++) {
-                        const nbNode = csrIndices[i];
-                        const tentativeG = gF[current] + csrDistances[i];
-                        if (tentativeG < gF[nbNode]) {
-                            gF[nbNode] = tentativeG;
-                            prevF[nbNode] = current;
-                            const otherG = gR[nbNode];
-                            if (otherG !== Number.POSITIVE_INFINITY) {
-                                const total = tentativeG + otherG;
-                                if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
-                            }
-                            openF.insert(tentativeG, nbNode);
+                const isCsrNode = hasCsr && current < csrNodeCount;
+                if (!isCsrNode) {
+                    const neighbors = adjacency[current];
+                    if (!neighbors || neighbors.length === 0) continue;
+
+                    for (let i = 0, n = neighbors.length; i < n; i++) {
+                        const nb = neighbors[i];
+                        const nbNode = nb.node;
+                        const tentativeG = gF[current] + nb.distance;
+                        if (tentativeG >= gF[nbNode]) continue;
+
+                        gF[nbNode] = tentativeG;
+                        prevF[nbNode] = current;
+
+                        const otherG = gR[nbNode];
+                        if (otherG !== PositiveInfinity) {
+                            const total = tentativeG + otherG;
+                            if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
                         }
+
+                        openF2.insert(tentativeG, nbNode);
                     }
-                } else {
-                    const neighbors = adj[current];
-                    if (neighbors && neighbors.length) {
-                        for (let i = 0, n = neighbors.length; i < n; i++) {
-                            const nb = neighbors[i];
-                            const nbNode = nb.node;
-                            const tentativeG = gF[current] + nb.distance;
-                            if (tentativeG < gF[nbNode]) {
-                                gF[nbNode] = tentativeG;
-                                prevF[nbNode] = current;
-                                const otherG = gR[nbNode];
-                                if (otherG !== Number.POSITIVE_INFINITY) {
-                                    const total = tentativeG + otherG;
-                                    if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
-                                }
-                                openF.insert(tentativeG, nbNode);
-                            }
-                        }
+                    continue;
+                }
+
+                for (let i = csrOffsets![current], endOff = csrOffsets![current + 1]; i < endOff; i++) {
+                    const nbNode = csrIndices![i];
+                    const tentativeG = gF[current] + csrDistances![i];
+                    if (tentativeG >= gF[nbNode]) continue;
+
+                    gF[nbNode] = tentativeG;
+                    prevF[nbNode] = current;
+
+                    const otherG = gR[nbNode];
+                    if (otherG !== PositiveInfinity) {
+                        const total = tentativeG + otherG;
+                        if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
                     }
+
+                    openF2.insert(tentativeG, nbNode);
                 }
             } else {
-                const current = openR.extractMin()!;
+                const current = openR2.extractMin()!;
                 if (visR[current] !== 0) continue;
                 lastExtractedGReverse = gR[current];
                 visR[current] = 1;
@@ -387,43 +414,46 @@ class TerraRoute implements Router {
 
                 // Reverse direction: same neighbor iteration because graph is undirected.
                 // Store successor pointer (next step toward end) i.e. nextR[neighbor] = current.
-                if (this.csrOffsets && current < this.csrNodeCount) {
-                    const csrOffsets = this.csrOffsets!;
-                    const csrIndices = this.csrIndices!;
-                    const csrDistances = this.csrDistances!;
-                    for (let i = csrOffsets[current], endOff = csrOffsets[current + 1]; i < endOff; i++) {
-                        const nbNode = csrIndices[i];
-                        const tentativeG = gR[current] + csrDistances[i];
-                        if (tentativeG < gR[nbNode]) {
-                            gR[nbNode] = tentativeG;
-                            nextR[nbNode] = current;
-                            const otherG = gF[nbNode];
-                            if (otherG !== Number.POSITIVE_INFINITY) {
-                                const total = tentativeG + otherG;
-                                if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
-                            }
-                            openR.insert(tentativeG, nbNode);
+                const isCsrNode = hasCsr && current < csrNodeCount;
+                if (!isCsrNode) {
+                    const neighbors = adjacency[current];
+                    if (!neighbors || neighbors.length === 0) continue;
+
+                    for (let i = 0, n = neighbors.length; i < n; i++) {
+                        const nb = neighbors[i];
+                        const nbNode = nb.node;
+                        const tentativeG = gR[current] + nb.distance;
+                        if (tentativeG >= gR[nbNode]) continue;
+
+                        gR[nbNode] = tentativeG;
+                        nextR[nbNode] = current;
+
+                        const otherG = gF[nbNode];
+                        if (otherG !== PositiveInfinity) {
+                            const total = tentativeG + otherG;
+                            if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
                         }
+
+                        openR2.insert(tentativeG, nbNode);
                     }
-                } else {
-                    const neighbors = adj[current];
-                    if (neighbors && neighbors.length) {
-                        for (let i = 0, n = neighbors.length; i < n; i++) {
-                            const nb = neighbors[i];
-                            const nbNode = nb.node;
-                            const tentativeG = gR[current] + nb.distance;
-                            if (tentativeG < gR[nbNode]) {
-                                gR[nbNode] = tentativeG;
-                                nextR[nbNode] = current;
-                                const otherG = gF[nbNode];
-                                if (otherG !== Number.POSITIVE_INFINITY) {
-                                    const total = tentativeG + otherG;
-                                    if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
-                                }
-                                openR.insert(tentativeG, nbNode);
-                            }
-                        }
+                    continue;
+                }
+
+                for (let i = csrOffsets![current], endOff = csrOffsets![current + 1]; i < endOff; i++) {
+                    const nbNode = csrIndices![i];
+                    const tentativeG = gR[current] + csrDistances![i];
+                    if (tentativeG >= gR[nbNode]) continue;
+
+                    gR[nbNode] = tentativeG;
+                    nextR[nbNode] = current;
+
+                    const otherG = gF[nbNode];
+                    if (otherG !== PositiveInfinity) {
+                        const total = tentativeG + otherG;
+                        if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
                     }
+
+                    openR2.insert(tentativeG, nbNode);
                 }
             }
         }
@@ -438,14 +468,14 @@ class TerraRoute implements Router {
         // Walk back from meeting to start, collecting nodes
         let cur = meetingNode;
         while (cur !== startIndex && cur >= 0) {
-            path.push(coords[cur]);
+            path.push(coordinates[cur]);
             cur = prevF[cur];
         }
         if (cur !== startIndex) {
             // Forward tree doesn't connect start to meeting (shouldn't happen if meeting is valid)
             return null;
         }
-        path.push(coords[startIndex]);
+        path.push(coordinates[startIndex]);
         path.reverse();
 
         // Walk from meeting to end (skip meeting node because it's already included)
@@ -455,7 +485,7 @@ class TerraRoute implements Router {
             if (cur < 0) {
                 return null;
             }
-            path.push(coords[cur]);
+            path.push(coordinates[cur]);
         }
 
         return {
@@ -516,11 +546,9 @@ class TerraRoute implements Router {
             && this.gScoreScratch
             && this.cameFromScratch
             && this.visitedScratch
-            && this.hScratch
             && this.gScoreRevScratch
             && this.cameFromRevScratch
-            && this.visitedRevScratch
-            && this.hRevScratch;
+            && this.visitedRevScratch;
 
         if (ifAlreadyBigEnough) {
             return; // Nothing to do
@@ -529,11 +557,9 @@ class TerraRoute implements Router {
         this.gScoreScratch = new Float64Array(capacity);
         this.cameFromScratch = new Int32Array(capacity);
         this.visitedScratch = new Uint8Array(capacity);
-        this.hScratch = new Float64Array(capacity);
         this.gScoreRevScratch = new Float64Array(capacity);
         this.cameFromRevScratch = new Int32Array(capacity);
         this.visitedRevScratch = new Uint8Array(capacity);
-        this.hRevScratch = new Float64Array(capacity);
         this.scratchCapacity = capacity;
     }
 

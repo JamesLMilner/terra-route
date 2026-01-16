@@ -66,6 +66,16 @@ export class FourAryHeap implements Heap {
         return minValue;
     }
 
+    peekMinKey(): number {
+        return this.length === 0 ? Number.POSITIVE_INFINITY : this.keys[0];
+    }
+
+    clear(): void {
+        // Keep backing arrays to avoid allocations; just reset counters.
+        this.length = 0;
+        this.insertCounter = 0;
+    }
+
     size(): number {
         return this.length;
     }

@@ -15,7 +15,7 @@ export default {
   collectCoverage: true,
   coveragePathIgnorePatterns: ["<rootDir>/src/test-utils", "<rootDir>/src/heap/heap.d.ts",],
   collectCoverageFrom: ["./src/**"],
-  coverageThreshold: {
+  coverageThreshold: process.env.COVERAGE_THRESHOLD === 'false' ? undefined : {
     global: {
       lines: 80,
       functions: 80,

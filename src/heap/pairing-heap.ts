@@ -44,6 +44,11 @@ export class PairingHeap implements Heap {
         return this.heapSize;
     }
 
+    public clear(): void {
+        this.root = null;
+        this.heapSize = 0;
+    }
+
     /**
      * Merges two pairing heaps into one. Assumes each parameter is a root.
      * Returns the root of the merged tree.

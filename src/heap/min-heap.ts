@@ -46,6 +46,15 @@ export class MinHeap implements Heap {
         return minNode.value;
     }
 
+    peekMinKey(): number {
+        return this.heap.length === 0 ? Number.POSITIVE_INFINITY : this.heap[0].key;
+    }
+
+    clear(): void {
+        this.heap.length = 0;
+        this.insertCounter = 0;
+    }
+
     size(): number {
         return this.heap.length;
     }

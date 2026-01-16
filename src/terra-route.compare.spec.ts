@@ -80,10 +80,9 @@ describe("TerraRoute", () => {
                 expect(routeFromTerraRoute).not.toBeNull();
 
                 const pathFinderLength = routeLength(routeFromPathFinder!)
-                const terraDrawLength = routeLength(routeFromTerraRoute!);
+                const terraRouteLength = routeLength(routeFromTerraRoute!);
 
-                expect(pathFinderLength).toBeGreaterThanOrEqual(terraDrawLength);
-
+                expect(terraRouteLength).toBeLessThanOrEqual(pathFinderLength);
             }
         });
 
@@ -162,9 +161,9 @@ describe("TerraRoute", () => {
                 expect(routeFromTerraRoute).not.toBeNull();
 
                 const pathFinderLength = routeLength(routeFromPathFinder!);
-                const terraDrawLength = routeLength(routeFromTerraRoute!);
+                const terraRouteLength = routeLength(routeFromTerraRoute!);
 
-                expect(pathFinderLength).toBeGreaterThanOrEqual(terraDrawLength);
+                expect(terraRouteLength).toBeLessThanOrEqual(pathFinderLength);
             }
         });
 
