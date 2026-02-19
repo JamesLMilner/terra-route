@@ -411,9 +411,6 @@ class TerraRoute implements Router {
             path.push(coordinates[cur]);
             cur = prevF[cur];
         }
-        if (cur !== startIndex) {
-            return null;
-        }
         path.push(coordinates[startIndex]);
         path.reverse();
 
@@ -444,9 +441,6 @@ class TerraRoute implements Router {
 
         let source = 0;
         for (let landmarkIndex = 0; landmarkIndex < targetLandmarkCount; landmarkIndex++) {
-            if (selected[source] !== 0) {
-                break;
-            }
             selected[source] = 1;
 
             const computedDistances = this.computeShortestDistancesFrom(source, nodeCount, offsets, indices, distances);
@@ -477,12 +471,6 @@ class TerraRoute implements Router {
         }
 
         const landmarkCount = allDistances.length;
-        if (landmarkCount === 0) {
-            this.landmarkNodeCount = 0;
-            this.landmarkCount = 0;
-            this.landmarkDistancesFlat = null;
-            return;
-        }
 
         const flat = new Float64Array(landmarkCount * nodeCount);
         for (let i = 0; i < landmarkCount; i++) {
