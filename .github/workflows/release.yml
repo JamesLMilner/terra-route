@@ -1,0 +1,74 @@
+name: terra-route Release
+
+permissions:
+  contents: write
+  id-token: write  # Required for OIDC
+
+on: workflow_dispatch
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.TERRA_ROUTE_PAT }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.x"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install
+        run: npm ci
+
+      - name: Update Docs
+        run: npm run docs
+
+      - name: Run build
+        run: npm run build
+
+      - name: Set git credentials
+        run: |
+          git config --global user.email "terradraw@githubactions.com"
+          git config --global user.name "James Milner"
+
+      - name: Release
+        run: npm run release
+
+      - name: Check if package-lock.json changed
+        run: |
+          npm install
+          # Check if package-lock.json changed
+          if ! git diff --exit-code --quiet package-lock.json; then
+            echo "package-lock.json has changed"
+            git add \*package.json
+            git add package-lock.json 
+            git commit -m "chore: automated update to package-lock.json during CI release"
+          else
+            echo "No changes to package-lock.json"
+          fi
+
+      - name: Push upstream
+        run: git push origin main
+
+      - name: Push tags upstream
+        run: git push origin main --tags
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANGELOG_URL: https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md
+        run: |
+          TAG="$(git describe --tags --abbrev=0)"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "GitHub release for $TAG already exists"
+          else
+            gh release create "$TAG" --notes "See [CHANGELOG.md](${CHANGELOG_URL}) for release notes." --verify-tag
+          fi
+
+      - name: Publish to npm
+        run: npm publish
+ 
