@@ -17,7 +17,9 @@
         "lint:fix": "eslint --fix --config eslint.config.mjs",
         "lint:fix:quiet": "eslint --fix --quiet --config eslint.config.mjs",
         "format": "prettier --ignore-path .gitignore --write \"**/*.+(js|ts|json)\"",
-        "format:quiet": "prettier --ignore-path .gitignore --write \"**/*.+(js|ts|json)\" --log-level=silent"
+        "format:quiet": "prettier --ignore-path .gitignore --write \"**/*.+(js|ts|json)\" --log-level=silent",
+        "release": "TYPE=$(node ./scripts/bump.mjs) && commit-and-tag-version -c ./scripts/versionrc.cjs -t terra-draw-route-snap-mode@ --release-as $TYPE",
+        "release:dryrun": "TYPE=$(node ./scripts/bump.mjs) && commit-and-tag-version -c ./scripts/versionrc.cjs -t terra-draw-route-snap-mode@ --dry-run --release-as $TYPE"
     },
     "type": "module",
     "source": "src/terra-route.ts",
@@ -33,6 +35,11 @@
     "author": "James Milner",
     "license": "MIT",
     "devDependencies": {
+        "@commitlint/cli": "17.1.2",
+        "@commitlint/config-conventional": "17.1.0",
+        "@conventional-changelog/git-client": "^1.0.1",
+        "commit-and-tag-version": "^12.5.0",
+        "conventional-recommended-bump": "^10.0.0",
         "@eslint/json": "^0.11.0",
         "@eslint/markdown": "^6.3.0",
         "@types/geojson": "^7946.0.16",
