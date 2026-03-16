@@ -31,6 +31,7 @@ class TerraRoute implements Router {
     private landmarkCount = 0;
     private landmarkDistancesFlat: Float64Array | null = null; // Layout: [landmark0 distances..., landmark1 distances...]
     private readonly maxLandmarks = 4;
+    private landmarksDirty = true;
 
     // Reusable typed scratch buffers for shortest-path search
     private gScoreScratch: Float64Array | null = null; // gScore per node (cost from start)
@@ -69,21 +70,40 @@ class TerraRoute implements Router {
         this.csrIndices = null;
         this.csrDistances = null;
         this.csrNodeCount = 0;
+        this.landmarkNodeCount = 0;
+        this.landmarkCount = 0;
+        this.landmarkDistancesFlat = null;
+        this.landmarksDirty = true;
 
         // Hoist to locals for speed (avoid repeated property lookups in hot loops)
         const coordIndexMapLocal = this.coordinateIndexMap; // Local alias for coord map
         const coordsLocal = this.coordinates; // Local alias for coordinates array
         const measureDistance = this.distanceMeasurement; // Local alias for distance function
 
-        // Pass 1: assign indices and count degrees per node
+        // Assign indices, count degrees and capture edges in one pass
         const degree: number[] = []; // Dynamic degree array; grows as nodes are discovered
-        this.forEachSegment(network, (a, b) => {
-            const indexA = this.indexCoordinate(a, coordIndexMapLocal, coordsLocal);
-            const indexB = this.indexCoordinate(b, coordIndexMapLocal, coordsLocal);
+        const edgeFrom: number[] = [];
+        const edgeTo: number[] = [];
+        const edgeDistance: number[] = [];
 
-            degree[indexA] = (degree[indexA] ?? 0) + 1;
-            degree[indexB] = (degree[indexB] ?? 0) + 1;
-        });
+        const features = network.features;
+        for (let f = 0, featureLength = features.length; f < featureLength; f++) {
+            const lineCoords = features[f].geometry.coordinates;
+            for (let i = 0, segmentLength = lineCoords.length - 1; i < segmentLength; i++) {
+                const from = lineCoords[i] as Position;
+                const to = lineCoords[i + 1] as Position;
+
+                const indexA = this.indexCoordinate(from, coordIndexMapLocal, coordsLocal);
+                const indexB = this.indexCoordinate(to, coordIndexMapLocal, coordsLocal);
+
+                degree[indexA] = (degree[indexA] ?? 0) + 1;
+                degree[indexB] = (degree[indexB] ?? 0) + 1;
+
+                edgeFrom.push(indexA);
+                edgeTo.push(indexB);
+                edgeDistance.push(measureDistance(from, to));
+            }
+        }
 
         // Build CSR arrays from degree counts
         const nodeCount = this.coordinates.length; // Total nodes discovered
@@ -97,14 +117,12 @@ class TerraRoute implements Router {
         const indices = new Int32Array(totalEdges); // Neighbor indices array
         const distances = new Float64Array(totalEdges); // Distances array aligned to indices
 
-        // Pass 2: fill CSR arrays using a write cursor per node
+        // Fill CSR arrays using a write cursor per node
         const cursor = offsets.slice(); // Current write positions per node
-        this.forEachSegment(network, (a, b) => {
-            // Read back indices (guaranteed to exist from pass 1)
-            const indexA = this.coordinateIndexMap.get(a[0])!.get(a[1])!;
-            const indexB = this.coordinateIndexMap.get(b[0])!.get(b[1])!;
-
-            const segmentDistance = measureDistance(a, b); // Edge weight once
+        for (let i = 0, edgeLength = edgeFrom.length; i < edgeLength; i++) {
+            const indexA = edgeFrom[i];
+            const indexB = edgeTo[i];
+            const segmentDistance = edgeDistance[i];
 
             let pos = cursor[indexA]++;
             indices[pos] = indexB;
@@ -112,13 +130,12 @@ class TerraRoute implements Router {
             pos = cursor[indexB]++;
             indices[pos] = indexA;
             distances[pos] = segmentDistance;
-        });
+        }
 
         // Commit CSR to instance
         this.csrOffsets = offsets;
         this.csrIndices = indices;
         this.csrDistances = distances;
-        this.buildLandmarkHeuristicData();
 
         // Prepare sparse shell only for dynamically added nodes later (no prefilled neighbor arrays)
         this.adjacencyList = new Array(nodeCount);
@@ -235,7 +252,10 @@ class TerraRoute implements Router {
         this.csrIndices = indices;
         this.csrDistances = distances;
         this.csrNodeCount = nodeCount;
-        this.buildLandmarkHeuristicData();
+        this.landmarksDirty = true;
+        this.landmarkNodeCount = 0;
+        this.landmarkCount = 0;
+        this.landmarkDistancesFlat = null;
 
         // Keep adjacency list for *future* dynamic additions, but clear existing edges to avoid duplication.
         this.adjacencyList = new Array(nodeCount);
@@ -278,6 +298,8 @@ class TerraRoute implements Router {
         const PositiveInfinity = Number.POSITIVE_INFINITY;
         const measureDistance = this.distanceMeasurement;
         const endCoordinates = end.geometry.coordinates;
+
+        this.ensureLandmarkHeuristicData();
         const landmarkDistancesFlat = this.landmarkDistancesFlat;
         const landmarkNodeCount = this.landmarkNodeCount;
         const landmarkCount = this.landmarkCount;
@@ -480,6 +502,15 @@ class TerraRoute implements Router {
         this.landmarkNodeCount = nodeCount;
         this.landmarkCount = landmarkCount;
         this.landmarkDistancesFlat = flat;
+        this.landmarksDirty = false;
+    }
+
+    // Build landmark tables only when needed by getRoute.
+    private ensureLandmarkHeuristicData(): void {
+        if (!this.landmarksDirty) {
+            return;
+        }
+        this.buildLandmarkHeuristicData();
     }
 
     // Dijkstra over CSR to compute all-pairs distances from one source node.
