@@ -836,6 +836,87 @@ describe("TerraRoute", () => {
             expect(result!.geometry.coordinates.at(-1)).toEqual([2, 0]);
         });
 
+
+        it("fails gracefully when a custom heap returns null unexpectedly", () => {
+            class NullingHeap {
+                private items: Array<{ key: number; value: number }> = [];
+
+                insert(key: number, value: number) {
+                    this.items.push({ key, value });
+                }
+
+                extractMin() {
+                    if (this.items.length === 0) {
+                        return null;
+                    }
+                    return null;
+                }
+
+                size() {
+                    return this.items.length;
+                }
+            }
+
+            const heapConstructor = NullingHeap as unknown as new () => {
+                insert: (key: number, value: number) => void;
+                extractMin: () => number | null;
+                size: () => number;
+            };
+
+            const network = createFeatureCollection([
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 0],
+                    [2, 0],
+                ]),
+            ]);
+
+            const rf = new TerraRoute({ heap: heapConstructor });
+
+            expect(() => rf.buildRouteGraph(network)).not.toThrow();
+
+            const result = rf.getRoute(
+                createPointFeature([0, 0]),
+                createPointFeature([2, 0]),
+            );
+
+            expect(result).toBeNull();
+        });
+
+
+        it("routes correctly when ALT landmarks are in another disconnected component", () => {
+            // Component A is listed first so ALT landmark selection starts here.
+            // Query is in component B, where landmark distances become Infinity and
+            // the ALT lower bound should safely degrade to 0 (Dijkstra behavior).
+            const network = createFeatureCollection([
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 0],
+                    [2, 0],
+                ]),
+                createLineStringFeature([
+                    [100, 0],
+                    [101, 0],
+                    [102, 0],
+                ]),
+            ]);
+
+            routeFinder.buildRouteGraph(network);
+
+            const start = createPointFeature([100, 0]);
+            const end = createPointFeature([102, 0]);
+
+            const result = routeFinder.getRoute(start, end);
+
+            expect(result).not.toBeNull();
+            expect(result!.geometry.coordinates).toEqual([
+                [100, 0],
+                [101, 0],
+                [102, 0],
+            ]);
+        });
+
+
         describe('returns null if', () => {
             it("start and end are the same", () => {
                 const network = createFeatureCollection([

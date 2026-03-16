@@ -26,21 +26,25 @@ class TerraRoute implements Router {
     private csrIndices: Int32Array | null = null;      // Column indices: neighbor node IDs, length = totalEdges
     private csrDistances: Float64Array | null = null;  // Edge weights aligned to csrIndices, length = totalEdges
     private csrNodeCount = 0; // Number of nodes captured in the CSR arrays
+    // ALT-style landmark heuristic data (query-time lower bounds via triangle inequality)
+    private landmarkNodeCount = 0;
+    private landmarkCount = 0;
+    private landmarkDistancesFlat: Float64Array | null = null; // Layout: [landmark0 distances..., landmark1 distances...]
+    private readonly maxLandmarks = 4;
+    private landmarksDirty = true;
 
     // Reusable typed scratch buffers for shortest-path search
     private gScoreScratch: Float64Array | null = null; // gScore per node (cost from start)
     private cameFromScratch: Int32Array | null = null; // Predecessor per node for path reconstruction
     private visitedScratch: Uint8Array | null = null; // Visited set to avoid reprocessing
-    // Reverse-direction scratch for bidirectional search
-    private gScoreRevScratch: Float64Array | null = null; // gScore per node from the end
-    private cameFromRevScratch: Int32Array | null = null; // Successor per node (next step toward the end)
-    private visitedRevScratch: Uint8Array | null = null; // Visited set for reverse search
+    private heuristicScratch: Float64Array | null = null; // Cached h(node) per query for A*
+    private heuristicStampScratch: Uint32Array | null = null; // Query-stamp per node for heuristic cache validity
+    private heuristicQueryStamp = 1; // Monotonic stamp to avoid clearing heuristic cache each query
     private scratchCapacity = 0; // Current capacity of scratch arrays
 
-    // Reused open sets to avoid heap allocations during repeated getRoute calls.
+    // Reused open set to avoid heap allocations during repeated getRoute calls.
     // (If a custom heap doesn't implement `clear()`, we fall back to constructing anew.)
     private openForward: InstanceType<HeapConstructor> | null = null;
-    private openReverse: InstanceType<HeapConstructor> | null = null;
 
     constructor(options?: {
         distanceMeasurement?: (a: Position, b: Position) => number; // Optional distance function override
@@ -66,21 +70,40 @@ class TerraRoute implements Router {
         this.csrIndices = null;
         this.csrDistances = null;
         this.csrNodeCount = 0;
+        this.landmarkNodeCount = 0;
+        this.landmarkCount = 0;
+        this.landmarkDistancesFlat = null;
+        this.landmarksDirty = true;
 
         // Hoist to locals for speed (avoid repeated property lookups in hot loops)
         const coordIndexMapLocal = this.coordinateIndexMap; // Local alias for coord map
         const coordsLocal = this.coordinates; // Local alias for coordinates array
         const measureDistance = this.distanceMeasurement; // Local alias for distance function
 
-        // Pass 1: assign indices and count degrees per node
+        // Assign indices, count degrees and capture edges in one pass
         const degree: number[] = []; // Dynamic degree array; grows as nodes are discovered
-        this.forEachSegment(network, (a, b) => {
-            const indexA = this.indexCoordinate(a, coordIndexMapLocal, coordsLocal);
-            const indexB = this.indexCoordinate(b, coordIndexMapLocal, coordsLocal);
+        const edgeFrom: number[] = [];
+        const edgeTo: number[] = [];
+        const edgeDistance: number[] = [];
 
-            degree[indexA] = (degree[indexA] ?? 0) + 1;
-            degree[indexB] = (degree[indexB] ?? 0) + 1;
-        });
+        const features = network.features;
+        for (let f = 0, featureLength = features.length; f < featureLength; f++) {
+            const lineCoords = features[f].geometry.coordinates;
+            for (let i = 0, segmentLength = lineCoords.length - 1; i < segmentLength; i++) {
+                const from = lineCoords[i] as Position;
+                const to = lineCoords[i + 1] as Position;
+
+                const indexA = this.indexCoordinate(from, coordIndexMapLocal, coordsLocal);
+                const indexB = this.indexCoordinate(to, coordIndexMapLocal, coordsLocal);
+
+                degree[indexA] = (degree[indexA] ?? 0) + 1;
+                degree[indexB] = (degree[indexB] ?? 0) + 1;
+
+                edgeFrom.push(indexA);
+                edgeTo.push(indexB);
+                edgeDistance.push(measureDistance(from, to));
+            }
+        }
 
         // Build CSR arrays from degree counts
         const nodeCount = this.coordinates.length; // Total nodes discovered
@@ -94,14 +117,12 @@ class TerraRoute implements Router {
         const indices = new Int32Array(totalEdges); // Neighbor indices array
         const distances = new Float64Array(totalEdges); // Distances array aligned to indices
 
-        // Pass 2: fill CSR arrays using a write cursor per node
+        // Fill CSR arrays using a write cursor per node
         const cursor = offsets.slice(); // Current write positions per node
-        this.forEachSegment(network, (a, b) => {
-            // Read back indices (guaranteed to exist from pass 1)
-            const indexA = this.coordinateIndexMap.get(a[0])!.get(a[1])!;
-            const indexB = this.coordinateIndexMap.get(b[0])!.get(b[1])!;
-
-            const segmentDistance = measureDistance(a, b); // Edge weight once
+        for (let i = 0, edgeLength = edgeFrom.length; i < edgeLength; i++) {
+            const indexA = edgeFrom[i];
+            const indexB = edgeTo[i];
+            const segmentDistance = edgeDistance[i];
 
             let pos = cursor[indexA]++;
             indices[pos] = indexB;
@@ -109,7 +130,7 @@ class TerraRoute implements Router {
             pos = cursor[indexB]++;
             indices[pos] = indexA;
             distances[pos] = segmentDistance;
-        });
+        }
 
         // Commit CSR to instance
         this.csrOffsets = offsets;
@@ -231,6 +252,10 @@ class TerraRoute implements Router {
         this.csrIndices = indices;
         this.csrDistances = distances;
         this.csrNodeCount = nodeCount;
+        this.landmarksDirty = true;
+        this.landmarkNodeCount = 0;
+        this.landmarkCount = 0;
+        this.landmarkDistancesFlat = null;
 
         // Keep adjacency list for *future* dynamic additions, but clear existing edges to avoid duplication.
         this.adjacencyList = new Array(nodeCount);
@@ -271,228 +296,265 @@ class TerraRoute implements Router {
         const csrNodeCount = this.csrNodeCount;
         const hasCsr = !!csrOffsets; // indices/distances should exist whenever offsets exist
         const PositiveInfinity = Number.POSITIVE_INFINITY;
+        const measureDistance = this.distanceMeasurement;
+        const endCoordinates = end.geometry.coordinates;
+
+        this.ensureLandmarkHeuristicData();
+        const landmarkDistancesFlat = this.landmarkDistancesFlat;
+        const landmarkNodeCount = this.landmarkNodeCount;
+        const landmarkCount = this.landmarkCount;
 
         // Ensure and init scratch buffers
         const nodeCount = coordinates.length; // Current number of nodes (may be >= csrNodeCount if new nodes added)
         this.ensureScratch(nodeCount); // Allocate scratch arrays if needed
 
         // Non-null after ensure
-        const gF = this.gScoreScratch!; // forward gScore (from start)
-        const gR = this.gScoreRevScratch!; // reverse gScore (from end)
-        const prevF = this.cameFromScratch!; // predecessor in forward search
-        const nextR = this.cameFromRevScratch!; // successor in reverse search (toward end)
+        const gF = this.gScoreScratch!; // gScore from start
+        const prevF = this.cameFromScratch!; // predecessor for reconstruction
         const visF = this.visitedScratch!;
-        const visR = this.visitedRevScratch!;
+        const heuristic = this.heuristicScratch!;
+        const heuristicStamp = this.heuristicStampScratch!;
 
         gF.fill(PositiveInfinity, 0, nodeCount);
-        gR.fill(PositiveInfinity, 0, nodeCount);
         prevF.fill(-1, 0, nodeCount);
-        nextR.fill(-1, 0, nodeCount);
         visF.fill(0, 0, nodeCount);
-        visR.fill(0, 0, nodeCount);
+
+        // Increment query stamp for heuristic cache validity; handle wraparound.
+        let queryStamp = (this.heuristicQueryStamp + 1) >>> 0;
+        if (queryStamp === 0) {
+            heuristicStamp.fill(0, 0, nodeCount);
+            queryStamp = 1;
+        }
+        this.heuristicQueryStamp = queryStamp;
+
+        const getHeuristic = (node: number): number => {
+            if (heuristicStamp[node] !== queryStamp) {
+                heuristicStamp[node] = queryStamp;
+
+                if (landmarkDistancesFlat && landmarkCount > 0 && node < landmarkNodeCount && endIndex < landmarkNodeCount) {
+                    let lowerBound = 0;
+                    for (let l = 0, offset = 0; l < landmarkCount; l++, offset += landmarkNodeCount) {
+                        const distanceToNode = landmarkDistancesFlat[offset + node];
+                        const distanceToEnd = landmarkDistancesFlat[offset + endIndex];
+
+                        if (!Number.isFinite(distanceToNode) || !Number.isFinite(distanceToEnd)) {
+                            continue;
+                        }
+
+                        const landmarkLowerBound = distanceToEnd >= distanceToNode
+                            ? distanceToEnd - distanceToNode
+                            : distanceToNode - distanceToEnd;
+
+                        if (landmarkLowerBound > lowerBound) {
+                            lowerBound = landmarkLowerBound;
+                        }
+                    }
+                    heuristic[node] = lowerBound;
+                } else {
+                    heuristic[node] = measureDistance(coordinates[node], endCoordinates);
+                }
+            }
+            return heuristic[node];
+        };
 
         // Prefer reusing heaps if supported.
         const openFReuse = this.openForward ?? (this.openForward = new this.heapConstructor());
-        const openRReuse = this.openReverse ?? (this.openReverse = new this.heapConstructor());
-
         const openFAny = openFReuse as unknown as { clear?: () => void };
-        const openRAny = openRReuse as unknown as { clear?: () => void };
-        const canReuse = !!openFAny.clear && !!openRAny.clear;
+        const canReuse = !!openFAny.clear;
 
         const openF2 = canReuse ? openFReuse : new this.heapConstructor();
-        const openR2 = canReuse ? openRReuse : new this.heapConstructor();
 
         if (canReuse) {
             openFAny.clear!();
-            openRAny.clear!();
         }
 
         gF[startIndex] = 0;
-        gR[endIndex] = 0;
+        openF2.insert(getHeuristic(startIndex), startIndex);
 
-        // Bidirectional Dijkstra. This keeps correctness simple while saving work by meeting in the middle.
-        openF2.insert(0, startIndex);
-        openR2.insert(0, endIndex);
-
-        // Best meeting point found so far
-        let bestPathCost = Number.POSITIVE_INFINITY;
-        let meetingNode = -1;
-
-        // Main bidirectional loop: expand alternately.
-        // Stopping rule: if current best path <= minF(openF) + minF(openR) then we can't improve.
-        // When peek isn't available (custom heap), we fall back to a looser but safe g-based rule.
-        let lastExtractedGForward = 0;
-        let lastExtractedGReverse = 0;
-
-        // Cache peek capability once (custom heaps may not implement it)
-        const openFPeek = openF2 as unknown as { peekMinKey?: () => number };
-        const openRPeek = openR2 as unknown as { peekMinKey?: () => number };
-        const canPeek = !!openFPeek.peekMinKey && !!openRPeek.peekMinKey;
-        while (openF2.size() > 0 && openR2.size() > 0) {
-            if (meetingNode >= 0) {
-                if (canPeek) {
-                    // Heaps are keyed by g, so this is the standard bidirectional Dijkstra bound.
-                    if ((openFPeek.peekMinKey!() + openRPeek.peekMinKey!()) >= bestPathCost) break;
-                } else {
-                    if ((lastExtractedGForward + lastExtractedGReverse) >= bestPathCost) break;
-                }
+        while (openF2.size() > 0) {
+            const current = openF2.extractMin();
+            if (current === null) {
+                break;
+            }
+            if (visF[current] !== 0) {
+                continue;
+            }
+            if (current === endIndex) {
+                break;
             }
 
-            // Expand one step from each side, prioritizing the smaller frontier.
-            const expandForward = openF2.size() <= openR2.size();
+            visF[current] = 1;
+            const currentDistance = gF[current];
 
-            if (expandForward) {
-                const current = openF2.extractMin()!;
-                if (visF[current] !== 0) continue;
-                lastExtractedGForward = gF[current];
-                visF[current] = 1;
-
-                // If reverse has finalized this node, we have a candidate meeting.
-                if (visR[current] !== 0) {
-                    const total = gF[current] + gR[current];
-                    if (total < bestPathCost) {
-                        bestPathCost = total;
-                        meetingNode = current;
-                    }
-                }
-
-                // Relax neighbors and push newly improved ones
-                const isCsrNode = hasCsr && current < csrNodeCount;
-                if (!isCsrNode) {
-                    const neighbors = adjacency[current];
-                    if (!neighbors || neighbors.length === 0) continue;
-
-                    for (let i = 0, n = neighbors.length; i < n; i++) {
-                        const nb = neighbors[i];
-                        const nbNode = nb.node;
-                        const tentativeG = gF[current] + nb.distance;
-                        if (tentativeG >= gF[nbNode]) continue;
-
-                        gF[nbNode] = tentativeG;
-                        prevF[nbNode] = current;
-
-                        const otherG = gR[nbNode];
-                        if (otherG !== PositiveInfinity) {
-                            const total = tentativeG + otherG;
-                            if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
-                        }
-
-                        openF2.insert(tentativeG, nbNode);
-                    }
+            const isCsrNode = hasCsr && current < csrNodeCount;
+            if (!isCsrNode) {
+                const neighbors = adjacency[current];
+                if (!neighbors || neighbors.length === 0) {
                     continue;
                 }
 
-                for (let i = csrOffsets![current], endOff = csrOffsets![current + 1]; i < endOff; i++) {
-                    const nbNode = csrIndices![i];
-                    const tentativeG = gF[current] + csrDistances![i];
-                    if (tentativeG >= gF[nbNode]) continue;
+                for (let i = 0, n = neighbors.length; i < n; i++) {
+                    const nb = neighbors[i];
+                    const nbNode = nb.node;
+                    const tentativeG = currentDistance + nb.distance;
+                    if (tentativeG >= gF[nbNode]) {
+                        continue;
+                    }
 
                     gF[nbNode] = tentativeG;
                     prevF[nbNode] = current;
-
-                    const otherG = gR[nbNode];
-                    if (otherG !== PositiveInfinity) {
-                        const total = tentativeG + otherG;
-                        if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
-                    }
-
-                    openF2.insert(tentativeG, nbNode);
+                    openF2.insert(tentativeG + getHeuristic(nbNode), nbNode);
                 }
-            } else {
-                const current = openR2.extractMin()!;
-                if (visR[current] !== 0) continue;
-                lastExtractedGReverse = gR[current];
-                visR[current] = 1;
+                continue;
+            }
 
-                if (visF[current] !== 0) {
-                    const total = gF[current] + gR[current];
-                    if (total < bestPathCost) {
-                        bestPathCost = total;
-                        meetingNode = current;
-                    }
-                }
-
-                // Reverse direction: same neighbor iteration because graph is undirected.
-                // Store successor pointer (next step toward end) i.e. nextR[neighbor] = current.
-                const isCsrNode = hasCsr && current < csrNodeCount;
-                if (!isCsrNode) {
-                    const neighbors = adjacency[current];
-                    if (!neighbors || neighbors.length === 0) continue;
-
-                    for (let i = 0, n = neighbors.length; i < n; i++) {
-                        const nb = neighbors[i];
-                        const nbNode = nb.node;
-                        const tentativeG = gR[current] + nb.distance;
-                        if (tentativeG >= gR[nbNode]) continue;
-
-                        gR[nbNode] = tentativeG;
-                        nextR[nbNode] = current;
-
-                        const otherG = gF[nbNode];
-                        if (otherG !== PositiveInfinity) {
-                            const total = tentativeG + otherG;
-                            if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
-                        }
-
-                        openR2.insert(tentativeG, nbNode);
-                    }
+            for (let i = csrOffsets![current], endOff = csrOffsets![current + 1]; i < endOff; i++) {
+                const nbNode = csrIndices![i];
+                const tentativeG = currentDistance + csrDistances![i];
+                if (tentativeG >= gF[nbNode]) {
                     continue;
                 }
 
-                for (let i = csrOffsets![current], endOff = csrOffsets![current + 1]; i < endOff; i++) {
-                    const nbNode = csrIndices![i];
-                    const tentativeG = gR[current] + csrDistances![i];
-                    if (tentativeG >= gR[nbNode]) continue;
-
-                    gR[nbNode] = tentativeG;
-                    nextR[nbNode] = current;
-
-                    const otherG = gF[nbNode];
-                    if (otherG !== PositiveInfinity) {
-                        const total = tentativeG + otherG;
-                        if (total < bestPathCost) { bestPathCost = total; meetingNode = nbNode; }
-                    }
-
-                    openR2.insert(tentativeG, nbNode);
-                }
+                gF[nbNode] = tentativeG;
+                prevF[nbNode] = current;
+                openF2.insert(tentativeG + getHeuristic(nbNode), nbNode);
             }
         }
 
-        if (meetingNode < 0) {
+        if (gF[endIndex] === PositiveInfinity) {
             return null;
         }
 
-        // Reconstruct path: start -> meeting using prevF, then meeting -> end using nextR
+        // Reconstruct path from end back to start through predecessor links.
         const path: Position[] = [];
 
-        // Walk back from meeting to start, collecting nodes
-        let cur = meetingNode;
+        let cur = endIndex;
         while (cur !== startIndex && cur >= 0) {
             path.push(coordinates[cur]);
             cur = prevF[cur];
         }
-        if (cur !== startIndex) {
-            // Forward tree doesn't connect start to meeting (shouldn't happen if meeting is valid)
-            return null;
-        }
         path.push(coordinates[startIndex]);
         path.reverse();
-
-        // Walk from meeting to end (skip meeting node because it's already included)
-        cur = meetingNode;
-        while (cur !== endIndex) {
-            cur = nextR[cur];
-            if (cur < 0) {
-                return null;
-            }
-            path.push(coordinates[cur]);
-        }
 
         return {
             type: "Feature",
             geometry: { type: "LineString", coordinates: path },
             properties: {},
         };
+    }
+
+    // Build ALT heuristic tables by running shortest-path trees from selected landmarks.
+    private buildLandmarkHeuristicData(): void {
+        const offsets = this.csrOffsets;
+        const indices = this.csrIndices;
+        const distances = this.csrDistances;
+        const nodeCount = this.csrNodeCount;
+
+        if (!offsets || !indices || !distances || nodeCount === 0) {
+            this.landmarkNodeCount = 0;
+            this.landmarkCount = 0;
+            this.landmarkDistancesFlat = null;
+            return;
+        }
+
+        const targetLandmarkCount = Math.min(this.maxLandmarks, nodeCount);
+        const selected = new Uint8Array(nodeCount);
+        const allDistances: Float64Array[] = [];
+
+        let source = 0;
+        for (let landmarkIndex = 0; landmarkIndex < targetLandmarkCount; landmarkIndex++) {
+            selected[source] = 1;
+
+            const computedDistances = this.computeShortestDistancesFrom(source, nodeCount, offsets, indices, distances);
+            allDistances.push(computedDistances);
+
+            let farthestDistance = -1;
+            let farthestIndex = -1;
+            for (let node = 0; node < nodeCount; node++) {
+                if (selected[node] !== 0) {
+                    continue;
+                }
+
+                const distanceAtNode = computedDistances[node];
+                if (!Number.isFinite(distanceAtNode)) {
+                    continue;
+                }
+
+                if (distanceAtNode > farthestDistance) {
+                    farthestDistance = distanceAtNode;
+                    farthestIndex = node;
+                }
+            }
+
+            if (farthestIndex < 0) {
+                break;
+            }
+            source = farthestIndex;
+        }
+
+        const landmarkCount = allDistances.length;
+
+        const flat = new Float64Array(landmarkCount * nodeCount);
+        for (let i = 0; i < landmarkCount; i++) {
+            flat.set(allDistances[i], i * nodeCount);
+        }
+
+        this.landmarkNodeCount = nodeCount;
+        this.landmarkCount = landmarkCount;
+        this.landmarkDistancesFlat = flat;
+        this.landmarksDirty = false;
+    }
+
+    // Build landmark tables only when needed by getRoute.
+    private ensureLandmarkHeuristicData(): void {
+        if (!this.landmarksDirty) {
+            return;
+        }
+        this.buildLandmarkHeuristicData();
+    }
+
+    // Dijkstra over CSR to compute all-pairs distances from one source node.
+    private computeShortestDistancesFrom(
+        source: number,
+        nodeCount: number,
+        offsets: Int32Array,
+        indices: Int32Array,
+        distances: Float64Array,
+    ): Float64Array {
+        const PositiveInfinity = Number.POSITIVE_INFINITY;
+        const bestDistance = new Float64Array(nodeCount);
+        const visited = new Uint8Array(nodeCount);
+        bestDistance.fill(PositiveInfinity);
+        bestDistance[source] = 0;
+
+        const openSet = new this.heapConstructor();
+        openSet.insert(0, source);
+
+        while (openSet.size() > 0) {
+            const current = openSet.extractMin();
+            if (current === null) {
+                break;
+            }
+            if (visited[current] !== 0) {
+                continue;
+            }
+
+            visited[current] = 1;
+            const currentDistance = bestDistance[current];
+
+            for (let i = offsets[current], endOffset = offsets[current + 1]; i < endOffset; i++) {
+                const neighbor = indices[i];
+                const tentativeDistance = currentDistance + distances[i];
+                if (tentativeDistance >= bestDistance[neighbor]) {
+                    continue;
+                }
+
+                bestDistance[neighbor] = tentativeDistance;
+                openSet.insert(tentativeDistance, neighbor);
+            }
+        }
+
+        return bestDistance;
     }
 
     /**
@@ -546,9 +608,8 @@ class TerraRoute implements Router {
             && this.gScoreScratch
             && this.cameFromScratch
             && this.visitedScratch
-            && this.gScoreRevScratch
-            && this.cameFromRevScratch
-            && this.visitedRevScratch;
+            && this.heuristicScratch
+            && this.heuristicStampScratch;
 
         if (ifAlreadyBigEnough) {
             return; // Nothing to do
@@ -557,9 +618,8 @@ class TerraRoute implements Router {
         this.gScoreScratch = new Float64Array(capacity);
         this.cameFromScratch = new Int32Array(capacity);
         this.visitedScratch = new Uint8Array(capacity);
-        this.gScoreRevScratch = new Float64Array(capacity);
-        this.cameFromRevScratch = new Int32Array(capacity);
-        this.visitedRevScratch = new Uint8Array(capacity);
+        this.heuristicScratch = new Float64Array(capacity);
+        this.heuristicStampScratch = new Uint32Array(capacity);
         this.scratchCapacity = capacity;
     }
 
