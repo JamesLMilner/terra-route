@@ -118,5 +118,10 @@
         "out": "docs",
         "skipErrorChecking": true,
         "sourceLinkExternal": true
+    },
+    "commitlint": {
+        "extends": [
+            "@commitlint/config-conventional"
+        ]
     }
 }
