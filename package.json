@@ -18,8 +18,8 @@
         "lint:fix:quiet": "eslint --fix --quiet --config eslint.config.mjs",
         "format": "prettier --ignore-path .gitignore --write \"**/*.+(js|ts|json)\"",
         "format:quiet": "prettier --ignore-path .gitignore --write \"**/*.+(js|ts|json)\" --log-level=silent",
-        "release": "TYPE=$(node ./scripts/bump.mjs) && commit-and-tag-version -c ./scripts/versionrc.cjs -t terra-draw-route-snap-mode@ --release-as $TYPE",
-        "release:dryrun": "TYPE=$(node ./scripts/bump.mjs) && commit-and-tag-version -c ./scripts/versionrc.cjs -t terra-draw-route-snap-mode@ --dry-run --release-as $TYPE"
+        "release": "TYPE=$(node ./scripts/bump.mjs) && commit-and-tag-version -c ./scripts/versionrc.cjs -t terra-route@ --release-as $TYPE",
+        "release:dryrun": "TYPE=$(node ./scripts/bump.mjs) && commit-and-tag-version -c ./scripts/versionrc.cjs -t terra-route@ --dry-run --release-as $TYPE"
     },
     "type": "module",
     "source": "src/terra-route.ts",
@@ -118,5 +118,10 @@
         "out": "docs",
         "skipErrorChecking": true,
         "sourceLinkExternal": true
+    },
+    "commitlint": {
+        "extends": [
+            "@commitlint/config-conventional"
+        ]
     }
 }

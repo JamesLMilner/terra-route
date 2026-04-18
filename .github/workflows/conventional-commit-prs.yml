@@ -11,8 +11,14 @@ jobs:
   validate-pr-title:
     runs-on: ubuntu-latest
     steps:
-      - name: PR Conventional Commit Validation
-        uses:  ytanikin/PRConventionalCommits@1.1.0
+      - uses: actions/checkout@v6
+      - name: Use Node
+        uses: actions/setup-node@v6
         with:
-          task_types: '["feat","fix","docs","test","ci","refactor","perf","chore","revert"]'
-          add_label: 'false'
+          node-version: "24.x"
+      - name: Install packages
+        run: npm ci
+      - name: PR Conventional Commit Validation Against Commit Lint Config
+        env:
+            TITLE: ${{ github.event.pull_request.title }}
+        run: echo "$TITLE" | npx commitlint

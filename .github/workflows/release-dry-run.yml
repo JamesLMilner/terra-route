@@ -8,7 +8,7 @@ on: workflow_dispatch
 
 jobs:
   release-dry-run:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v6
@@ -23,9 +23,6 @@ jobs:
 
       - name: Install
         run: npm ci
-
-      - name: Update Docs
-        run: npm run docs
 
       - name: Run build
         run: npm run build
