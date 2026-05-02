@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [0.0.16](https://github.com/JamesLMilner/terra-route/compare/terra-route@0.0.15...terra-route@0.0.16) (2026-05-02)
+
+
+### chore
+
+* autogenerate API docs on tag push (#15) ([](https://github.com/JamesLMilner/terra-route/commit/91a7d303c5d4b49bbc38d02aec7dfbba91e8f941)), closes [#15](https://github.com/JamesLMilner/terra-route/issues/15)
+* fix release script (#14) ([](https://github.com/JamesLMilner/terra-route/commit/2c598bc8bd30ab4a397af768f0148411c0bd4bd0)), closes [#14](https://github.com/JamesLMilner/terra-route/issues/14)
+
 ## 0.0.15 (2026-03-16)
 
 
