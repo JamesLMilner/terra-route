@@ -34,6 +34,7 @@
     "unpkg": "./dist/terra-route.umd.js",
     "author": "James Milner",
     "license": "MIT",
+    "repository": "JamesLMilner/terra-route",
     "devDependencies": {
         "@commitlint/cli": "17.1.2",
         "@commitlint/config-conventional": "17.1.0",
