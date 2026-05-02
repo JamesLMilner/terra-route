@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [0.0.17](https://github.com/JamesLMilner/terra-route/compare/terra-route@0.0.16...terra-route@0.0.17) (2026-05-02)
+
+
+### chore
+
+* add repository field to package.json for release script (#16) ([](https://github.com/JamesLMilner/terra-route/commit/596452266757fdd81bbe40df56c8d2b00d4ca247)), closes [#16](https://github.com/JamesLMilner/terra-route/issues/16)
+
 ## [0.0.16](https://github.com/JamesLMilner/terra-route/compare/terra-route@0.0.15...terra-route@0.0.16) (2026-05-02)
 
 
