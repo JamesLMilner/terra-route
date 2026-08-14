@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [0.0.18](https://github.com/JamesLMilner/terra-route/compare/terra-route@0.0.17...terra-route@0.0.18) (2026-08-14)
+
+
+### perf
+
+* 15 percent perf improvement (#17) ([](https://github.com/JamesLMilner/terra-route/commit/76a8a9ddbe35f6f565fd3250e9f77ab839cb6353)), closes [#17](https://github.com/JamesLMilner/terra-route/issues/17)
+
 ## [0.0.17](https://github.com/JamesLMilner/terra-route/compare/terra-route@0.0.16...terra-route@0.0.17) (2026-05-02)
 
 
