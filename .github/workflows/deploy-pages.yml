@@ -35,6 +35,9 @@ jobs:
       - name: Build docs
         run: npm run docs
 
+      - name: Create nojekyll file
+        run: touch docs/.nojekyll
+
       - name: Configure git identity
         run: |
           set -euo pipefail
@@ -58,6 +61,7 @@ jobs:
 
           rm -rf /tmp/gh-pages/docs
           rsync -a docs/ /tmp/gh-pages/docs/
+
 
       - name: Commit and push docs
         run: |
