@@ -37,11 +37,11 @@ class TerraRoute implements Router {
 
     // Reusable typed scratch buffers for shortest-path search
     private gScoreScratch: Float64Array | null = null; // gScore per node (cost from start)
-    private gScoreStampScratch: Uint32Array | null = null; // Query stamp for gScore validity
+    private gScoreStampScratch: Uint8Array | null = null; // Query stamp for gScore validity
     private cameFromScratch: Int32Array | null = null; // Predecessor per node for path reconstruction
-    private visitedScratch: Uint32Array | null = null; // Query stamp for visited nodes
+    private visitedScratch: Uint8Array | null = null; // Query stamp for visited nodes
     private heuristicScratch: Float64Array | null = null; // Cached h(node) per query for A*
-    private heuristicStampScratch: Uint32Array | null = null; // Query-stamp per node for heuristic cache validity
+    private heuristicStampScratch: Uint8Array | null = null; // Query-stamp per node for heuristic cache validity
     private heuristicQueryStamp = 1; // Monotonic stamp to avoid clearing heuristic cache each query
     private scratchCapacity = 0; // Current capacity of scratch arrays
 
@@ -322,8 +322,8 @@ class TerraRoute implements Router {
         const heuristicStamp = this.heuristicStampScratch!;
 
         // Increment query stamp for all query-local scratch state; handle wraparound.
-        let queryStamp = (this.heuristicQueryStamp + 1) >>> 0;
-        if (queryStamp === 0) {
+        let queryStamp = this.heuristicQueryStamp + 1;
+        if (queryStamp > 255) {
             heuristicStamp.fill(0, 0, nodeCount);
             gScoreStamp.fill(0, 0, nodeCount);
             visF.fill(0, 0, nodeCount);
@@ -636,11 +636,11 @@ class TerraRoute implements Router {
         }
         const capacity = size | 0; // Ensure integer
         this.gScoreScratch = new Float64Array(capacity);
-        this.gScoreStampScratch = new Uint32Array(capacity);
+        this.gScoreStampScratch = new Uint8Array(capacity);
         this.cameFromScratch = new Int32Array(capacity);
-        this.visitedScratch = new Uint32Array(capacity);
+        this.visitedScratch = new Uint8Array(capacity);
         this.heuristicScratch = new Float64Array(capacity);
-        this.heuristicStampScratch = new Uint32Array(capacity);
+        this.heuristicStampScratch = new Uint8Array(capacity);
         this.scratchCapacity = capacity;
     }
 

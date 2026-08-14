@@ -560,7 +560,7 @@ describe("TerraRoute", () => {
             const isLowerBranch = JSON.stringify(firstRoute) === JSON.stringify(lowerBranch);
             expect(isUpperBranch || isLowerBranch).toBe(true);
 
-            for (let i = 0; i < 50; i++) {
+            for (let i = 0; i < 256; i++) {
                 const next = routeFinder.getRoute(start, end);
                 expect(next).not.toBeNull();
                 expect(next!.geometry.coordinates).toEqual(firstRoute);
