@@ -522,6 +522,239 @@ describe("TerraRoute", () => {
             expect(result!.geometry.coordinates.length).toBeGreaterThanOrEqual(2);
         });
 
+        it("returns a stable route across repeated calls when multiple equal-length routes exist", () => {
+            const network = createFeatureCollection([
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 1],
+                    [2, 0],
+                ]),
+                createLineStringFeature([
+                    [0, 0],
+                    [1, -1],
+                    [2, 0],
+                ]),
+            ]);
+
+            routeFinder.buildRouteGraph(network);
+
+            const start = createPointFeature([0, 0]);
+            const end = createPointFeature([2, 0]);
+
+            const first = routeFinder.getRoute(start, end);
+            expect(first).not.toBeNull();
+
+            const upperBranch = [
+                [0, 0],
+                [1, 1],
+                [2, 0],
+            ];
+            const lowerBranch = [
+                [0, 0],
+                [1, -1],
+                [2, 0],
+            ];
+
+            const firstRoute = first!.geometry.coordinates;
+            const isUpperBranch = JSON.stringify(firstRoute) === JSON.stringify(upperBranch);
+            const isLowerBranch = JSON.stringify(firstRoute) === JSON.stringify(lowerBranch);
+            expect(isUpperBranch || isLowerBranch).toBe(true);
+
+            for (let i = 0; i < 256; i++) {
+                const next = routeFinder.getRoute(start, end);
+                expect(next).not.toBeNull();
+                expect(next!.geometry.coordinates).toEqual(firstRoute);
+            }
+        });
+
+        it("returns a stable route across repeated calls in a larger graph with multiple equal-length alternatives", () => {
+            const network = createFeatureCollection([
+                // Baseline corridor (equal in total length to the two detours below)
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 0],
+                    [2, 0],
+                    [3, 0],
+                    [4, 0],
+                ]),
+
+                // Upper detour: four diagonals, same total distance as baseline corridor
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 1],
+                    [2, 0],
+                    [3, 1],
+                    [4, 0],
+                ]),
+
+                // Lower detour: mirrored version of upper detour, also same total distance
+                createLineStringFeature([
+                    [0, 0],
+                    [1, -1],
+                    [2, 0],
+                    [3, -1],
+                    [4, 0],
+                ]),
+
+                // Extra branches that should not change shortest-path cost to the destination
+                createLineStringFeature([
+                    [1, 0],
+                    [1, 2],
+                ]),
+                createLineStringFeature([
+                    [2, 0],
+                    [2, 2],
+                ]),
+                createLineStringFeature([
+                    [3, 0],
+                    [3, 2],
+                ]),
+                createLineStringFeature([
+                    [1, 0],
+                    [1, -2],
+                ]),
+                createLineStringFeature([
+                    [2, 0],
+                    [2, -2],
+                ]),
+                createLineStringFeature([
+                    [3, 0],
+                    [3, -2],
+                ]),
+            ]);
+
+            routeFinder.buildRouteGraph(network);
+
+            const start = createPointFeature([0, 0]);
+            const end = createPointFeature([4, 0]);
+
+            const first = routeFinder.getRoute(start, end);
+            expect(first).not.toBeNull();
+
+            const baseline = [
+                [0, 0],
+                [1, 0],
+                [2, 0],
+                [3, 0],
+                [4, 0],
+            ];
+            const upper = [
+                [0, 0],
+                [1, 1],
+                [2, 0],
+                [3, 1],
+                [4, 0],
+            ];
+            const lower = [
+                [0, 0],
+                [1, -1],
+                [2, 0],
+                [3, -1],
+                [4, 0],
+            ];
+
+            const firstRoute = first!.geometry.coordinates;
+            const isBaseline = JSON.stringify(firstRoute) === JSON.stringify(baseline);
+            const isUpper = JSON.stringify(firstRoute) === JSON.stringify(upper);
+            const isLower = JSON.stringify(firstRoute) === JSON.stringify(lower);
+            expect(isBaseline || isUpper || isLower).toBe(true);
+
+            for (let i = 0; i < 100; i++) {
+                const next = routeFinder.getRoute(start, end);
+                expect(next).not.toBeNull();
+                expect(next!.geometry.coordinates).toEqual(firstRoute);
+            }
+        });
+
+        it("keeps the selected equal-length route stable after landmark heuristic activates", () => {
+            const network = createFeatureCollection([
+                createLineStringFeature([
+                    [0, 0],
+                    [1, 1],
+                    [2, 0],
+                ]),
+                createLineStringFeature([
+                    [0, 0],
+                    [1, -1],
+                    [2, 0],
+                ]),
+            ]);
+
+            routeFinder.buildRouteGraph(network);
+
+            const start = createPointFeature([0, 0]);
+            const end = createPointFeature([2, 0]);
+
+            const first = routeFinder.getRoute(start, end);
+            expect(first).not.toBeNull();
+
+            // Cross the landmark activation threshold and ensure output remains stable.
+            for (let i = 0; i < 300; i++) {
+                const next = routeFinder.getRoute(start, end);
+                expect(next).not.toBeNull();
+            }
+
+            const afterThreshold = routeFinder.getRoute(start, end);
+            expect(afterThreshold).not.toBeNull();
+            expect(afterThreshold!.geometry.coordinates).toEqual(first!.geometry.coordinates);
+        });
+
+        it("still returns the unique shortest path after crossing landmark activation threshold", () => {
+            const expectedCorridor = [
+                [0, 0],
+                [1, 0],
+                [2, 0],
+                [3, 0],
+                [4, 0],
+                [5, 0],
+            ];
+
+            const network = createFeatureCollection([
+                createLineStringFeature(expectedCorridor),
+
+                // Distractor branches should not affect shortest-path choice.
+                createLineStringFeature([
+                    [1, 0],
+                    [1, 1],
+                ]),
+                createLineStringFeature([
+                    [2, 0],
+                    [2, 1],
+                ]),
+                createLineStringFeature([
+                    [3, 0],
+                    [3, 1],
+                ]),
+                createLineStringFeature([
+                    [2, 0],
+                    [2, -1],
+                ]),
+                createLineStringFeature([
+                    [3, 0],
+                    [3, -1],
+                ]),
+            ]);
+
+            routeFinder.buildRouteGraph(network);
+
+            const start = createPointFeature([0, 0]);
+            const end = createPointFeature([5, 0]);
+
+            const beforeThreshold = routeFinder.getRoute(start, end);
+            expect(beforeThreshold).not.toBeNull();
+            expect(beforeThreshold!.geometry.coordinates).toEqual(expectedCorridor);
+
+            // Trigger landmark table build and continue routing beyond threshold.
+            for (let i = 0; i < 300; i++) {
+                const next = routeFinder.getRoute(start, end);
+                expect(next).not.toBeNull();
+            }
+
+            const afterThreshold = routeFinder.getRoute(start, end);
+            expect(afterThreshold).not.toBeNull();
+            expect(afterThreshold!.geometry.coordinates).toEqual(expectedCorridor);
+        });
+
         it("supports a custom heap implementation", () => {
             // Minimal heap that satisfies the expected interface (extracts minimum key).
             class SimpleMinHeap {
