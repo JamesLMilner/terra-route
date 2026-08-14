@@ -31,12 +31,15 @@ class TerraRoute implements Router {
     private landmarkCount = 0;
     private landmarkDistancesFlat: Float64Array | null = null; // Layout: [landmark0 distances..., landmark1 distances...]
     private readonly maxLandmarks = 4;
+    private readonly landmarkActivationThreshold = 256;
+    private routeQueriesSinceLandmarkInvalidation = 0;
     private landmarksDirty = true;
 
     // Reusable typed scratch buffers for shortest-path search
     private gScoreScratch: Float64Array | null = null; // gScore per node (cost from start)
+    private gScoreStampScratch: Uint32Array | null = null; // Query stamp for gScore validity
     private cameFromScratch: Int32Array | null = null; // Predecessor per node for path reconstruction
-    private visitedScratch: Uint8Array | null = null; // Visited set to avoid reprocessing
+    private visitedScratch: Uint32Array | null = null; // Query stamp for visited nodes
     private heuristicScratch: Float64Array | null = null; // Cached h(node) per query for A*
     private heuristicStampScratch: Uint32Array | null = null; // Query-stamp per node for heuristic cache validity
     private heuristicQueryStamp = 1; // Monotonic stamp to avoid clearing heuristic cache each query
@@ -73,6 +76,7 @@ class TerraRoute implements Router {
         this.landmarkNodeCount = 0;
         this.landmarkCount = 0;
         this.landmarkDistancesFlat = null;
+        this.routeQueriesSinceLandmarkInvalidation = 0;
         this.landmarksDirty = true;
 
         // Hoist to locals for speed (avoid repeated property lookups in hot loops)
@@ -256,6 +260,7 @@ class TerraRoute implements Router {
         this.landmarkNodeCount = 0;
         this.landmarkCount = 0;
         this.landmarkDistancesFlat = null;
+        this.routeQueriesSinceLandmarkInvalidation = 0;
 
         // Keep adjacency list for *future* dynamic additions, but clear existing edges to avoid duplication.
         this.adjacencyList = new Array(nodeCount);
@@ -310,19 +315,18 @@ class TerraRoute implements Router {
 
         // Non-null after ensure
         const gF = this.gScoreScratch!; // gScore from start
+        const gScoreStamp = this.gScoreStampScratch!;
         const prevF = this.cameFromScratch!; // predecessor for reconstruction
         const visF = this.visitedScratch!;
         const heuristic = this.heuristicScratch!;
         const heuristicStamp = this.heuristicStampScratch!;
 
-        gF.fill(PositiveInfinity, 0, nodeCount);
-        prevF.fill(-1, 0, nodeCount);
-        visF.fill(0, 0, nodeCount);
-
-        // Increment query stamp for heuristic cache validity; handle wraparound.
+        // Increment query stamp for all query-local scratch state; handle wraparound.
         let queryStamp = (this.heuristicQueryStamp + 1) >>> 0;
         if (queryStamp === 0) {
             heuristicStamp.fill(0, 0, nodeCount);
+            gScoreStamp.fill(0, 0, nodeCount);
+            visF.fill(0, 0, nodeCount);
             queryStamp = 1;
         }
         this.heuristicQueryStamp = queryStamp;
@@ -369,6 +373,7 @@ class TerraRoute implements Router {
         }
 
         gF[startIndex] = 0;
+    gScoreStamp[startIndex] = queryStamp;
         openF2.insert(getHeuristic(startIndex), startIndex);
 
         while (openF2.size() > 0) {
@@ -376,14 +381,14 @@ class TerraRoute implements Router {
             if (current === null) {
                 break;
             }
-            if (visF[current] !== 0) {
+            if (visF[current] === queryStamp) {
                 continue;
             }
             if (current === endIndex) {
                 break;
             }
 
-            visF[current] = 1;
+            visF[current] = queryStamp;
             const currentDistance = gF[current];
 
             const isCsrNode = hasCsr && current < csrNodeCount;
@@ -397,11 +402,15 @@ class TerraRoute implements Router {
                     const nb = neighbors[i];
                     const nbNode = nb.node;
                     const tentativeG = currentDistance + nb.distance;
-                    if (tentativeG >= gF[nbNode]) {
+                    const bestKnownG = gScoreStamp[nbNode] === queryStamp
+                        ? gF[nbNode]
+                        : PositiveInfinity;
+                    if (tentativeG >= bestKnownG) {
                         continue;
                     }
 
                     gF[nbNode] = tentativeG;
+                    gScoreStamp[nbNode] = queryStamp;
                     prevF[nbNode] = current;
                     openF2.insert(tentativeG + getHeuristic(nbNode), nbNode);
                 }
@@ -411,17 +420,21 @@ class TerraRoute implements Router {
             for (let i = csrOffsets![current], endOff = csrOffsets![current + 1]; i < endOff; i++) {
                 const nbNode = csrIndices![i];
                 const tentativeG = currentDistance + csrDistances![i];
-                if (tentativeG >= gF[nbNode]) {
+                const bestKnownG = gScoreStamp[nbNode] === queryStamp
+                    ? gF[nbNode]
+                    : PositiveInfinity;
+                if (tentativeG >= bestKnownG) {
                     continue;
                 }
 
                 gF[nbNode] = tentativeG;
+                gScoreStamp[nbNode] = queryStamp;
                 prevF[nbNode] = current;
                 openF2.insert(tentativeG + getHeuristic(nbNode), nbNode);
             }
         }
 
-        if (gF[endIndex] === PositiveInfinity) {
+        if (gScoreStamp[endIndex] !== queryStamp) {
             return null;
         }
 
@@ -510,6 +523,12 @@ class TerraRoute implements Router {
         if (!this.landmarksDirty) {
             return;
         }
+
+        this.routeQueriesSinceLandmarkInvalidation++;
+        if (this.routeQueriesSinceLandmarkInvalidation < this.landmarkActivationThreshold) {
+            return;
+        }
+
         this.buildLandmarkHeuristicData();
     }
 
@@ -606,6 +625,7 @@ class TerraRoute implements Router {
     private ensureScratch(size: number): void {
         const ifAlreadyBigEnough = this.scratchCapacity >= size
             && this.gScoreScratch
+            && this.gScoreStampScratch
             && this.cameFromScratch
             && this.visitedScratch
             && this.heuristicScratch
@@ -616,8 +636,9 @@ class TerraRoute implements Router {
         }
         const capacity = size | 0; // Ensure integer
         this.gScoreScratch = new Float64Array(capacity);
+        this.gScoreStampScratch = new Uint32Array(capacity);
         this.cameFromScratch = new Int32Array(capacity);
-        this.visitedScratch = new Uint8Array(capacity);
+        this.visitedScratch = new Uint32Array(capacity);
         this.heuristicScratch = new Float64Array(capacity);
         this.heuristicStampScratch = new Uint32Array(capacity);
         this.scratchCapacity = capacity;
