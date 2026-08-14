@@ -20,11 +20,11 @@
 
 <p>Here is an example output of a benchmark run for routing:</p>
 <pre>
-Terra Route         | █████ 142ms
-GeoJSON Path Finder | ██████████████████ 570ms
-ngraph.graph        | ██████████████████████████████████████████████████ 1570ms
+Terra Route         | ████ 91ms
+GeoJSON Path Finder | ██████████████████████ 537ms
+ngraph.graph        | ██████████████████████████████████████████████████ 1229ms
 </pre>
-<p>Using default Haversine distance, Terra Route is approximately 4.6x faster than GeoJSON Path Finder with Haversine distance for A -&gt; B path finding. If you pass in the CheapRuler distance metric (you can use the exposed <code>createCheapRuler</code> function), it is approximately x8 faster than GeoJSON Path Finder with Haversine distance.</p>
+<p>Using default Haversine distance, Terra Route is approximately 5.75x faster than GeoJSON Path Finder with Haversine distance for A -&gt; B path finding. If you pass in the CheapRuler distance metric (you can use the exposed <code>createCheapRuler</code> function), it is approximately x8 faster than GeoJSON Path Finder with Haversine distance.</p>
 <p>For initialisation of the network, Terra Route is approximately 19x faster with Haversine than GeoJSON Path Finder. Terra Draw splits out instantiating the Class of the library from the actual graph building, which is done via <code>buildRouteGraph</code>. This allows you to defer graph creation to an appropriate time.</p>
 <p>Terra Route uses an <a href="https://en.wikipedia.org/wiki/A*_search_algorithm">A* algorithm</a> landmark-assisted heuristics. By default it uses a <a href="https://en.wikipedia.org/wiki/D-ary_heap">four-ary heap</a> for the underlying priority queue, although this is configurable.</p>
 <h2 id="limitations" class="tsd-anchor-link">Limitations<a href="#limitations" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2><ul>
